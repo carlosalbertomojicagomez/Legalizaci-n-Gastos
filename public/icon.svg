@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a2540" />
+      <stop offset="100%" stop-color="#071b2e" />
+    </linearGradient>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <linearGradient id="docGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#f1f5f9" />
+    </linearGradient>
+    <linearGradient id="colombiaStripe" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="50%" stop-color="#2563eb" />
+      <stop offset="100%" stop-color="#dc2626" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="110" fill="url(#bgGrad)" />
+
+  <!-- Shield Base for Audit Security -->
+  <path d="M256 60 C330 60 410 90 410 170 C410 310 290 410 256 440 C222 410 102 310 102 170 C102 90 182 60 256 60 Z" fill="#0f3458" stroke="#1e4e79" stroke-width="6" />
+
+  <!-- Invoice Sheet Inside -->
+  <g transform="translate(146, 110)">
+    <rect width="220" height="280" rx="14" fill="url(#docGrad)" filter="drop-shadow(0 12px 24px rgba(0,0,0,0.35))" />
+    
+    <!-- Top Bar with Colombian Flag Accents -->
+    <rect x="0" y="0" width="220" height="12" rx="6" fill="url(#colombiaStripe)" />
+
+    <!-- Receipt Header Lines -->
+    <rect x="24" y="32" width="90" height="16" rx="4" fill="#0a2540" />
+    <rect x="150" y="34" width="46" height="12" rx="3" fill="#64748b" />
+    
+    <!-- DIAN Electronic Badge -->
+    <rect x="24" y="60" width="172" height="24" rx="6" fill="#ecfdf5" stroke="#10b981" stroke-width="1.5" />
+    <text x="32" y="76" font-family="system-ui, sans-serif" font-size="10" font-weight="bold" fill="#047857">FACTURA ELECTRÓNICA DIAN</text>
+
+    <!-- Simulated Items Lines -->
+    <rect x="24" y="102" width="110" height="8" rx="2" fill="#94a3b8" />
+    <rect x="150" y="102" width="46" height="8" rx="2" fill="#94a3b8" />
+    <rect x="24" y="122" width="80" height="8" rx="2" fill="#cbd5e1" />
+    <rect x="160" y="122" width="36" height="8" rx="2" fill="#cbd5e1" />
+    <rect x="24" y="142" width="95" height="8" rx="2" fill="#cbd5e1" />
+    <rect x="155" y="142" width="41" height="8" rx="2" fill="#cbd5e1" />
+
+    <line x1="24" y1="168" x2="196" y2="168" stroke="#e2e8f0" stroke-width="2" stroke-dasharray="4 3" />
+
+    <!-- Total Area -->
+    <rect x="24" y="180" width="60" height="10" rx="2" fill="#64748b" />
+    <rect x="120" y="178" width="76" height="14" rx="3" fill="#0a2540" />
+
+    <!-- CUFE Barcode / QR Simulation -->
+    <g transform="translate(24, 206)">
+      <rect width="172" height="48" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1" />
+      <!-- Barcode lines -->
+      <rect x="12" y="10" width="4" height="28" fill="#0a2540" />
+      <rect x="20" y="10" width="2" height="28" fill="#0a2540" />
+      <rect x="26" y="10" width="6" height="28" fill="#0a2540" />
+      <rect x="36" y="10" width="3" height="28" fill="#0a2540" />
+      <rect x="43" y="10" width="5" height="28" fill="#0a2540" />
+      <rect x="52" y="10" width="2" height="28" fill="#0a2540" />
+      <rect x="58" y="10" width="4" height="28" fill="#0a2540" />
+      <rect x="66" y="10" width="7" height="28" fill="#0a2540" />
+      <rect x="77" y="10" width="3" height="28" fill="#0a2540" />
+      <text x="90" y="24" font-family="monospace" font-size="9" font-weight="bold" fill="#047857">CUFE 96 HEX</text>
+      <text x="90" y="36" font-family="monospace" font-size="7" fill="#64748b">DIAN VÁLIDO</text>
+    </g>
+  </g>
+
+  <!-- Green Checkmark Verification Stamp -->
+  <g transform="translate(320, 310)">
+    <circle cx="48" cy="48" r="44" fill="url(#shieldGrad)" filter="drop-shadow(0 6px 14px rgba(16, 185, 129, 0.45))" stroke="#ffffff" stroke-width="4" />
+    <path d="M32 48 L44 60 L66 36" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+</svg>
