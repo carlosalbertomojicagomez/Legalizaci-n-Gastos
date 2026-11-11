@@ -5,6 +5,7 @@ import { WorkerExpenseForm } from './components/worker/WorkerExpenseForm';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { UserModal, PRESET_USUARIOS } from './components/auth/UserModal';
 import { ValidationTestsModal } from './components/common/ValidationTestsModal';
+import { GoogleDriveModal } from './components/drive/GoogleDriveModal';
 import {
   obtenerColaOffline,
   sincronizarColaConServidor,
@@ -49,6 +50,7 @@ export default function App() {
   // Modales
   const [modalUsuario, setModalUsuario] = useState(false);
   const [modalTests, setModalTests] = useState(false);
+  const [modalDrive, setModalDrive] = useState(false);
 
   // Modo Oscuro
   const [temaOscuro, setTemaOscuro] = useState(() => {
@@ -248,6 +250,7 @@ export default function App() {
         usuario={usuario}
         onAbrirUsuarioModal={() => setModalUsuario(true)}
         onAbrirTestsModal={() => setModalTests(true)}
+        onAbrirDriveModal={() => setModalDrive(true)}
         temaOscuro={temaOscuro}
         onToggleTema={() => setTemaOscuro(!temaOscuro)}
         isOnline={isOnline}
@@ -263,6 +266,7 @@ export default function App() {
             catalogos={catalogos}
             onGastoGuardado={handleGastoGuardado}
             isOnline={isOnline}
+            onAbrirDrive={() => setModalDrive(true)}
           />
         ) : (
           <AdminDashboard
@@ -270,6 +274,7 @@ export default function App() {
             onActualizarEstado={handleActualizarEstado}
             catalogs={catalogos}
             onSaveCatalogs={handleSaveCatalogs}
+            onAbrirDrive={() => setModalDrive(true)}
           />
         )}
       </main>
@@ -287,6 +292,13 @@ export default function App() {
         isOpen={modalTests}
         onClose={() => setModalTests(false)}
         cufeMuestraExistente={gastos[0]?.cufe}
+      />
+
+      {/* Modal de Google Drive (Workspace) */}
+      <GoogleDriveModal
+        isOpen={modalDrive}
+        onClose={() => setModalDrive(false)}
+        gastos={gastos}
       />
     </div>
   );

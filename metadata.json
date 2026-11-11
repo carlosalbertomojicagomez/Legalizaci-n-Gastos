@@ -1,6 +1,10 @@
 {
   "name": "Legalización de gastos",
   "description": "PWA mobile-first para legalización de gastos operacionales en Colombia con captura de factura electrónica DIAN, extracción por IA, validación de CUFE y reportes en Excel.",
-  "requestFramePermissions": ["camera"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

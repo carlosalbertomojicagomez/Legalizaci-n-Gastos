@@ -19,7 +19,8 @@ import {
   FileText,
   CreditCard,
   Tag,
-  WifiOff
+  WifiOff,
+  Cloud
 } from 'lucide-react';
 
 interface Props {
@@ -27,6 +28,7 @@ interface Props {
   catalogos: { tiposGasto: string[]; tiposPago: string[] };
   onGastoGuardado: (gasto: Gasto) => void;
   isOnline: boolean;
+  onAbrirDrive: () => void;
 }
 
 export const WorkerExpenseForm: React.FC<Props> = ({
@@ -34,6 +36,7 @@ export const WorkerExpenseForm: React.FC<Props> = ({
   catalogos,
   onGastoGuardado,
   isOnline,
+  onAbrirDrive,
 }) => {
   const [paso, setPaso] = useState<'inicio' | 'camara' | 'procesando_ia' | 'formulario' | 'exito'>('inicio');
 
@@ -389,13 +392,23 @@ export const WorkerExpenseForm: React.FC<Props> = ({
           </div>
         )}
 
-        <button
-          onClick={reiniciarFormulario}
-          className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl shadow-lg active:scale-95 transition text-sm flex items-center justify-center gap-2"
-        >
-          <Camera className="w-5 h-5" />
-          Legalizar Otro Gasto
-        </button>
+        <div className="space-y-2 pt-1">
+          <button
+            onClick={onAbrirDrive}
+            className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-2xl shadow-md active:scale-95 transition text-xs flex items-center justify-center gap-2"
+          >
+            <Cloud className="w-4 h-4" />
+            <span>Respaldar Comprobante en Google Drive</span>
+          </button>
+
+          <button
+            onClick={reiniciarFormulario}
+            className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl shadow-lg active:scale-95 transition text-sm flex items-center justify-center gap-2"
+          >
+            <Camera className="w-5 h-5" />
+            <span>Legalizar Otro Gasto</span>
+          </button>
+        </div>
       </div>
     );
   }

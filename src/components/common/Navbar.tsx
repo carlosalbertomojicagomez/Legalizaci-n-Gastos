@@ -10,7 +10,7 @@ import {
   WifiOff,
   RefreshCw,
   FlaskConical,
-  CheckCircle2
+  Cloud
 } from 'lucide-react';
 
 interface Props {
@@ -19,6 +19,7 @@ interface Props {
   usuario: UsuarioPerfil;
   onAbrirUsuarioModal: () => void;
   onAbrirTestsModal: () => void;
+  onAbrirDriveModal: () => void;
   temaOscuro: boolean;
   onToggleTema: () => void;
   isOnline: boolean;
@@ -33,6 +34,7 @@ export const Navbar: React.FC<Props> = ({
   usuario,
   onAbrirUsuarioModal,
   onAbrirTestsModal,
+  onAbrirDriveModal,
   temaOscuro,
   onToggleTema,
   isOnline,
@@ -97,6 +99,16 @@ export const Navbar: React.FC<Props> = ({
               </button>
             )}
           </div>
+
+          {/* Botón Google Drive */}
+          <button
+            onClick={onAbrirDriveModal}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-xs font-bold transition active:scale-95"
+            title="Google Drive: respaldar y consultar facturas en la nube"
+          >
+            <Cloud className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            <span className="hidden sm:inline">Drive</span>
+          </button>
 
           {/* Botón PWA Install */}
           <PWAInstallButton />

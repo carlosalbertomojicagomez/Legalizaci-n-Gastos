@@ -2,13 +2,9 @@ import ExcelJS from 'exceljs';
 import { Gasto } from '../types';
 
 /**
- * Exporta el listado de gastos a un libro Excel (.xlsx) utilizando ExcelJS,
- * incrustando la imagen de la factura en la última columna de cada fila.
+ * Genera el Blob binario del libro Excel (.xlsx) con fotografías incrustadas
  */
-export async function exportarGastosAExcel(
-  gastos: Gasto[],
-  nombreArchivo = 'Legalizaciones_Gastos_DIAN.xlsx'
-): Promise<void> {
+export async function generarExcelBlob(gastos: Gasto[]): Promise<Blob> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Legalización de Gastos PWA - DIAN Colombia';
   workbook.created = new Date();
@@ -50,10 +46,16 @@ export async function exportarGastosAExcel(
 
   for (let i = 0; i < gastos.length; i++) {
     const g = gastos[i];
-    const rowIndex = i + 2; // Fila 1 es cabecera
+    const rowIndex = i + 2;
 
     const row = worksheet.addRow({
-      creado_en: new Date(g.creado_en).toLocaleDateString('es-CO') + ' ' + new Date(g.creado_en).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' }),
+      creado_en:
+        new Date(g.creado_en).toLocaleDateString('es-CO') +
+        ' ' +
+        new Date(g.creado_en).toLocaleTimeString('es-CO', {
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
       estado: g.estado.toUpperCase(),
       nombre_responsable: g.nombre_responsable,
       cargo: g.cargo,
@@ -68,19 +70,16 @@ export async function exportarGastosAExcel(
       iva: Number(g.iva) || 0,
       total: Number(g.total) || 0,
       cufe: g.cufe,
-      foto: '', // Celda receptora de la imagen
+      foto: '',
     });
 
-    // Formato de moneda COP para columnas numéricas
     row.getCell(12).numFmt = '"$"#,##0';
     row.getCell(13).numFmt = '"$"#,##0';
     row.getCell(14).numFmt = '"$"#,##0';
 
-    // Altura adecuada para desplegar la miniatura de la factura
     row.height = 98;
     row.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
 
-    // Estilo condicional según estado
     const estadoCell = row.getCell(2);
     estadoCell.alignment = { vertical: 'middle', horizontal: 'center' };
     if (g.estado === 'aprobado') {
@@ -91,7 +90,6 @@ export async function exportarGastosAExcel(
       estadoCell.font = { bold: true, color: { argb: 'FFB45309' } };
     }
 
-    // Incrustar la imagen si existe
     if (g.foto_url) {
       try {
         let base64Clean = '';
@@ -129,12 +127,20 @@ export async function exportarGastosAExcel(
     }
   }
 
-  // Generación y descarga directa en el navegador
   const buffer = await workbook.xlsx.writeBuffer();
-  const blob = new Blob([buffer], {
+  return new Blob([buffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
+}
 
+/**
+ * Exporta y descarga directamente en el navegador
+ */
+export async function exportarGastosAExcel(
+  gastos: Gasto[],
+  nombreArchivo = 'Legalizaciones_Gastos_DIAN.xlsx'
+): Promise<void> {
+  const blob = await generarExcelBlob(gastos);
   const downloadUrl = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = downloadUrl;

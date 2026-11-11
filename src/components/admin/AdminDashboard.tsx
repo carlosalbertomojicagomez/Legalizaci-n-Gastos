@@ -22,7 +22,8 @@ import {
   Copy,
   ExternalLink,
   ShieldCheck,
-  UserCheck
+  UserCheck,
+  Cloud
 } from 'lucide-react';
 
 interface Props {
@@ -30,6 +31,7 @@ interface Props {
   onActualizarEstado: (id: string, nuevoEstado: 'aprobado' | 'rechazado', comentario?: string) => Promise<void>;
   catalogs: { tiposGasto: string[]; tiposPago: string[] };
   onSaveCatalogs: (tiposGasto: string[], tiposPago: string[]) => Promise<void>;
+  onAbrirDrive: () => void;
 }
 
 export const AdminDashboard: React.FC<Props> = ({
@@ -37,6 +39,7 @@ export const AdminDashboard: React.FC<Props> = ({
   onActualizarEstado,
   catalogs,
   onSaveCatalogs,
+  onAbrirDrive,
 }) => {
   // Modales
   const [gastoSeleccionado, setGastoSeleccionado] = useState<Gasto | null>(null);
@@ -200,6 +203,15 @@ export const AdminDashboard: React.FC<Props> = ({
           >
             <Settings className="w-4 h-4 text-slate-500" />
             <span>Editar Catálogos</span>
+          </button>
+
+          <button
+            onClick={onAbrirDrive}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-md transition active:scale-95"
+            title="Abrir almacenamiento y respaldos en Google Drive"
+          >
+            <Cloud className="w-4 h-4" />
+            <span>Google Drive</span>
           </button>
 
           <button
