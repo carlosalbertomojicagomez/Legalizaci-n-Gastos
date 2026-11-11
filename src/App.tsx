@@ -1,11 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Gasto, RolUsuario, UsuarioPerfil } from './types';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Gasto, RolUsuario, UsuarioPerfil, NotificacionItem } from './types';
 import { Navbar } from './components/common/Navbar';
 import { WorkerExpenseForm } from './components/worker/WorkerExpenseForm';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { UserModal, PRESET_USUARIOS } from './components/auth/UserModal';
 import { ValidationTestsModal } from './components/common/ValidationTestsModal';
 import { GoogleDriveModal } from './components/drive/GoogleDriveModal';
+import { GoogleSheetsModal } from './components/sheets/GoogleSheetsModal';
+import { NotificationToasts } from './components/notifications/NotificationToasts';
+import { procesarNotificacionDeGasto } from './utils/notifications';
 import {
   obtenerColaOffline,
   sincronizarColaConServidor,
@@ -17,6 +20,10 @@ export default function App() {
     const saved = localStorage.getItem('usuario_legalizacion');
     return saved ? JSON.parse(saved) : PRESET_USUARIOS[0];
   });
+  const usuarioRef = useRef(usuario);
+  useEffect(() => {
+    usuarioRef.current = usuario;
+  }, [usuario]);
 
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [cargandoGastos, setCargandoGastos] = useState(true);
@@ -51,6 +58,18 @@ export default function App() {
   const [modalUsuario, setModalUsuario] = useState(false);
   const [modalTests, setModalTests] = useState(false);
   const [modalDrive, setModalDrive] = useState(false);
+  const [modalSheets, setModalSheets] = useState(false);
+
+  // Notificaciones de Aprobación/Rechazo
+  const [notificaciones, setNotificaciones] = useState<NotificacionItem[]>(() => {
+    const saved = localStorage.getItem('notificaciones_gastos');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [toastsActivos, setToastsActivos] = useState<NotificacionItem[]>([]);
+
+  useEffect(() => {
+    localStorage.setItem('notificaciones_gastos', JSON.stringify(notificaciones));
+  }, [notificaciones]);
 
   // Modo Oscuro
   const [temaOscuro, setTemaOscuro] = useState(() => {
@@ -157,9 +176,22 @@ export default function App() {
               return [msg.data, ...prev];
             });
           } else if (msg.type === 'status_updated') {
+            const gastoActualizado = msg.data as Gasto;
             setGastos((prev) =>
-              prev.map((g) => (g.id === msg.data.id ? msg.data : g))
+              prev.map((g) => (g.id === gastoActualizado.id ? gastoActualizado : g))
             );
+
+            // Disparar notificación web e in-app para el trabajador
+            const notif = procesarNotificacionDeGasto(gastoActualizado, usuarioRef.current);
+            if (notif) {
+              setNotificaciones((prev) => [notif, ...prev.slice(0, 49)]);
+              setToastsActivos((prev) => [notif, ...prev]);
+
+              // Auto descartar el toast después de 7 segundos
+              setTimeout(() => {
+                setToastsActivos((prev) => prev.filter((t) => t.id !== notif.id));
+              }, 7000);
+            }
           } else if (msg.type === 'database_updated') {
             cargarGastos();
           }
@@ -242,6 +274,24 @@ export default function App() {
     localStorage.setItem('usuario_legalizacion', JSON.stringify(u));
   };
 
+  const handleLimpiarNotificaciones = () => {
+    setNotificaciones([]);
+  };
+
+  const handleMarcarNotificacionLeida = (id: string) => {
+    setNotificaciones((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, leida: true } : n))
+    );
+  };
+
+  const handleMarcarTodasLeidas = () => {
+    setNotificaciones((prev) => prev.map((n) => ({ ...n, leida: true })));
+  };
+
+  const handleDescartarToast = (id: string) => {
+    setToastsActivos((prev) => prev.filter((t) => t.id !== id));
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors">
       <Navbar
@@ -251,12 +301,23 @@ export default function App() {
         onAbrirUsuarioModal={() => setModalUsuario(true)}
         onAbrirTestsModal={() => setModalTests(true)}
         onAbrirDriveModal={() => setModalDrive(true)}
+        onAbrirSheetsModal={() => setModalSheets(true)}
         temaOscuro={temaOscuro}
         onToggleTema={() => setTemaOscuro(!temaOscuro)}
         isOnline={isOnline}
         colaOfflineCount={colaOfflineCount}
         onSincronizarOffline={ejecutarSincronizacionOffline}
         sincronizando={sincronizando}
+        notificaciones={notificaciones}
+        onLimpiarNotificaciones={handleLimpiarNotificaciones}
+        onMarcarNotificacionLeida={handleMarcarNotificacionLeida}
+        onMarcarTodasNotificacionesLeidas={handleMarcarTodasLeidas}
+      />
+
+      {/* Notificaciones flotantes en pantalla (Toasts) */}
+      <NotificationToasts
+        notificaciones={toastsActivos}
+        onDescartar={handleDescartarToast}
       />
 
       <main className="flex-1 p-3 sm:p-6">
@@ -275,6 +336,7 @@ export default function App() {
             catalogs={catalogos}
             onSaveCatalogs={handleSaveCatalogs}
             onAbrirDrive={() => setModalDrive(true)}
+            onAbrirSheets={() => setModalSheets(true)}
           />
         )}
       </main>
@@ -298,6 +360,13 @@ export default function App() {
       <GoogleDriveModal
         isOpen={modalDrive}
         onClose={() => setModalDrive(false)}
+        gastos={gastos}
+      />
+
+      {/* Modal de Google Sheets (Workspace) */}
+      <GoogleSheetsModal
+        isOpen={modalSheets}
+        onClose={() => setModalSheets(false)}
         gastos={gastos}
       />
     </div>

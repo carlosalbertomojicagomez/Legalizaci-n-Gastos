@@ -20,7 +20,11 @@ import {
   CreditCard,
   Tag,
   WifiOff,
-  Cloud
+  Cloud,
+  Maximize2,
+  QrCode,
+  X,
+  Info
 } from 'lucide-react';
 
 interface Props {
@@ -47,8 +51,13 @@ export const WorkerExpenseForm: React.FC<Props> = ({
 
   // Campos de la Factura (Autodiligenciados + Editables)
   const [emisor, setEmisor] = useState('');
+  const [nitEmisor, setNitEmisor] = useState('');
   const [numeroFactura, setNumeroFactura] = useState('');
   const [cufe, setCufe] = useState('');
+  const [qrDian, setQrDian] = useState('');
+  const [confianzaExtraccion, setConfianzaExtraccion] = useState<'alta' | 'media' | 'baja'>('alta');
+  const [mensajeDiagnostico, setMensajeDiagnostico] = useState<string | null>(null);
+  const [modalFotoZoom, setModalFotoZoom] = useState(false);
   const [fechaEmision, setFechaEmision] = useState(new Date().toISOString().split('T')[0]);
   const [fechaVencimiento, setFechaVencimiento] = useState('');
   const [valorNeto, setValorNeto] = useState<number>(0);
@@ -69,6 +78,7 @@ export const WorkerExpenseForm: React.FC<Props> = ({
   const [errorGlobal, setErrorGlobal] = useState<string | null>(null);
   const [gastoCreado, setGastoCreado] = useState<Gasto | null>(null);
   const [guardadoOffline, setGuardadoOffline] = useState(false);
+  const [autorizarDiferenciaAritmetica, setAutorizarDiferenciaAritmetica] = useState(false);
 
   // Actualizar nombre y cargo al cambiar usuario
   useEffect(() => {
@@ -118,11 +128,16 @@ export const WorkerExpenseForm: React.FC<Props> = ({
 
       // Precarga de valores leídos (dato no visible = null / vacío)
       if (data.emisor) setEmisor(data.emisor);
+      if (data.nit_emisor) setNitEmisor(data.nit_emisor);
       if (data.numero_factura) setNumeroFactura(data.numero_factura);
       if (data.cufe) {
         setCufe(data.cufe);
         verificarCufeEnServidor(data.cufe);
       }
+      if (data.qr_dian) setQrDian(data.qr_dian);
+      if (data.confianza_extraccion) setConfianzaExtraccion(data.confianza_extraccion);
+      if (data.mensaje_diagnostico) setMensajeDiagnostico(data.mensaje_diagnostico);
+      if (data.concepto_sugerido && !objeto) setObjeto(data.concepto_sugerido);
       if (data.fecha_emision) setFechaEmision(data.fecha_emision);
       if (data.fecha_vencimiento) setFechaVencimiento(data.fecha_vencimiento);
       if (data.valor_neto !== undefined && data.valor_neto !== null) {
@@ -136,6 +151,7 @@ export const WorkerExpenseForm: React.FC<Props> = ({
       }
     } catch (err: any) {
       console.warn('Aviso en extracción con IA:', err.message);
+      setMensajeDiagnostico('No se pudo procesar la imagen automáticamente. Complete los campos manualmente.');
     } finally {
       setPaso('formulario');
     }
@@ -202,11 +218,11 @@ export const WorkerExpenseForm: React.FC<Props> = ({
 
     // 4. Verificación aritmética de Neto + IVA = Total
     const checkAritmetica = verificarAritmeticaCOP(valorNeto, iva, total);
-    if (!checkAritmetica.cuadra) {
-      const confirmacion = window.confirm(
-        `Alerta Aritmética Contable:\n\nNeto ($ ${formatCOP(valorNeto)}) + IVA ($ ${formatCOP(iva)}) = $ ${formatCOP(checkAritmetica.sumaEsperada)}.\nEl Total ingresado es $ ${formatCOP(total)}, existiendo una diferencia de $ ${formatCOP(checkAritmetica.diferencia)}.\n\n¿Desea radicar el gasto de todos modos?`
+    if (!checkAritmetica.cuadra && !autorizarDiferenciaAritmetica) {
+      setErrorGlobal(
+        `Alerta aritmética: Neto ($ ${formatCOP(valorNeto)}) + IVA ($ ${formatCOP(iva)}) = $ ${formatCOP(checkAritmetica.sumaEsperada)}, existiendo una diferencia de $ ${formatCOP(checkAritmetica.diferencia)} frente al Total ($ ${formatCOP(total)}). Active la autorización de diferencia contable abajo para radicar.`
       );
-      if (!confirmacion) return;
+      return;
     }
 
     setGuardando(true);
@@ -216,8 +232,11 @@ export const WorkerExpenseForm: React.FC<Props> = ({
       creado_en: new Date().toISOString(),
       user_id: usuario.id,
       emisor: sanitizeText(emisor),
+      nit_emisor: sanitizeText(nitEmisor) || null,
       numero_factura: sanitizeText(numeroFactura),
       cufe: cufe.trim().toLowerCase(),
+      qr_dian: qrDian || null,
+      confianza_extraccion: confianzaExtraccion,
       fecha_emision: fechaEmision,
       fecha_vencimiento: fechaVencimiento || null,
       valor_neto: Number(valorNeto) || 0,
@@ -287,8 +306,13 @@ export const WorkerExpenseForm: React.FC<Props> = ({
     setFotoBase64('');
     setFotoTomadaEn('');
     setEmisor('');
+    setNitEmisor('');
     setNumeroFactura('');
     setCufe('');
+    setQrDian('');
+    setConfianzaExtraccion('alta');
+    setMensajeDiagnostico(null);
+    setModalFotoZoom(false);
     setValorNeto(0);
     setIva(0);
     setTotal(0);
@@ -358,13 +382,13 @@ export const WorkerExpenseForm: React.FC<Props> = ({
             </div>
           ) : (
             <p className="text-xs text-slate-600 dark:text-slate-400">
-              El comprobante y su código CUFE han quedado registrados para revisión contable.
+              El comprobante y su código CUFE han quedado registrados para auditoría. Te notificaremos mediante alertas web cuando sea revisado.
             </p>
           )}
         </div>
 
         {gastoCreado && (
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 border border-slate-200 dark:border-slate-700 text-left text-xs space-y-2 shadow-sm">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 border border-slate-200 dark:border-slate-700 text-left text-xs space-y-2.5 shadow-sm">
             <div className="flex justify-between border-b pb-2 dark:border-slate-700">
               <span className="text-slate-400">Total Legalizado:</span>
               <span className="font-black text-emerald-600 dark:text-emerald-400 text-sm">
@@ -377,6 +401,14 @@ export const WorkerExpenseForm: React.FC<Props> = ({
                 {gastoCreado.emisor}
               </span>
             </div>
+            {gastoCreado.nit_emisor && (
+              <div className="flex justify-between">
+                <span className="text-slate-400">NIT Emisor:</span>
+                <span className="font-mono text-slate-700 dark:text-slate-300">
+                  {gastoCreado.nit_emisor}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-slate-400">N° Factura:</span>
               <span className="font-mono text-slate-700 dark:text-slate-300">
@@ -389,6 +421,29 @@ export const WorkerExpenseForm: React.FC<Props> = ({
                 {gastoCreado.cufe}
               </span>
             </div>
+            {gastoCreado.qr_dian && (
+              <div className="flex flex-col gap-0.5 pt-1">
+                <span className="text-slate-400 text-[10px]">Parámetros QR DIAN:</span>
+                <span className="font-mono text-[8.5px] text-slate-500 dark:text-slate-400 break-all bg-slate-50 dark:bg-slate-900 p-1.5 rounded">
+                  {gastoCreado.qr_dian}
+                </span>
+              </div>
+            )}
+            {gastoCreado.foto_url && (
+              <div className="pt-2 border-t dark:border-slate-700">
+                <span className="text-slate-400 text-[10px] block mb-1">Foto Adjunta al Expediente:</span>
+                <div
+                  onClick={() => setModalFotoZoom(true)}
+                  className="relative aspect-[16/9] rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 cursor-pointer group"
+                >
+                  <img src={gastoCreado.foto_url} alt="Factura adjunta" className="w-full h-full object-cover group-hover:scale-105 transition" />
+                  <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[11px] font-bold gap-1">
+                    <Maximize2 className="w-4 h-4" />
+                    <span>Ver Foto Completa</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -444,6 +499,10 @@ export const WorkerExpenseForm: React.FC<Props> = ({
               <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
               <span>Soporte sin conexión con sincronización automática</span>
             </div>
+            <div className="flex items-center gap-2 text-xs text-emerald-300">
+              <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+              <span>Notificaciones web instantáneas de aprobación o rechazo</span>
+            </div>
           </div>
 
           <button
@@ -462,27 +521,64 @@ export const WorkerExpenseForm: React.FC<Props> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                <h3 className="font-bold text-sm">Evidencia Fotográfica</h3>
+                <h3 className="font-bold text-sm">Evidencia Fotográfica de la Factura</h3>
               </div>
-              <button
-                type="button"
-                onClick={() => setPaso('camara')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-blue-600 dark:text-blue-400 text-xs font-bold hover:bg-slate-200 transition"
-              >
-                <Camera className="w-3.5 h-3.5" />
-                Repetir Foto
-              </button>
+              <div className="flex items-center gap-1.5">
+                {fotoUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setModalFotoZoom(true)}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-600 transition"
+                  >
+                    <Maximize2 className="w-3.5 h-3.5" />
+                    <span>Ampliar</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPaso('camara')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-blue-600 dark:text-blue-400 text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-600 transition"
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  Repetir Foto
+                </button>
+              </div>
             </div>
 
             {fotoUrl && (
-              <div className="relative aspect-[16/9] rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700">
-                <img src={fotoUrl} alt="Factura" className="w-full h-full object-cover" />
+              <div
+                onClick={() => setModalFotoZoom(true)}
+                className="relative aspect-[16/9] rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 cursor-pointer group"
+              >
+                <img src={fotoUrl} alt="Factura capturada" className="w-full h-full object-cover group-hover:scale-[1.02] transition" />
                 <span className="absolute bottom-2 left-2 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-full backdrop-blur-sm">
-                  Cámara trasera en vivo
+                  Foto vinculada a la base de datos
+                </span>
+                <span className="absolute top-2 right-2 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-full backdrop-blur-sm flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                  <Maximize2 className="w-3 h-3" /> Clic para zoom
                 </span>
               </div>
             )}
           </div>
+
+          {/* Banner de diagnóstico de la lectura real con IA */}
+          {mensajeDiagnostico && (
+            <div
+              className={`p-3.5 rounded-2xl border text-xs flex items-start gap-2.5 ${
+                confianzaExtraccion === 'alta'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                  : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200'
+              }`}
+            >
+              <Sparkles className="w-4 h-4 flex-shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2 font-bold">
+                  <span>Lectura de Factura ({confianzaExtraccion === 'alta' ? 'Confianza Alta' : 'Revisión Sugerida'})</span>
+                </div>
+                <p className="text-[11px] opacity-90">{mensajeDiagnostico}</p>
+              </div>
+            </div>
+          )}
 
           {/* Banner de alerta de duplicado */}
           {infoDuplicado?.duplicado && (
@@ -522,18 +618,33 @@ export const WorkerExpenseForm: React.FC<Props> = ({
               </h4>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Emisor / Razón Social del Proveedor *
-              </label>
-              <input
-                required
-                type="text"
-                placeholder="Ej: Organización Terpel S.A."
-                value={emisor}
-                onChange={(e) => setEmisor(e.target.value)}
-                className="w-full text-sm p-3 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Emisor / Razón Social del Proveedor *
+                </label>
+                <input
+                  required
+                  type="text"
+                  placeholder="Ej: Organización Terpel S.A."
+                  value={emisor}
+                  onChange={(e) => setEmisor(e.target.value)}
+                  className="w-full text-sm p-3 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  NIT del Emisor (DIAN)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej: 860.005.224-6"
+                  value={nitEmisor}
+                  onChange={(e) => setNitEmisor(e.target.value)}
+                  className="w-full text-sm p-3 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 font-mono"
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -605,6 +716,19 @@ export const WorkerExpenseForm: React.FC<Props> = ({
               </p>
             </div>
 
+            {/* Cadena QR DIAN detectada */}
+            {qrDian && (
+              <div className="p-2.5 bg-slate-50 dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-slate-800 text-[10px] space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-slate-600 dark:text-slate-400">
+                  <QrCode className="w-3.5 h-3.5 text-blue-500" />
+                  <span>Parámetros QR DIAN Detectados:</span>
+                </div>
+                <p className="font-mono text-slate-600 dark:text-slate-300 break-all select-all leading-tight bg-white dark:bg-slate-800/80 p-2 rounded-xl border border-slate-200 dark:border-slate-700">
+                  {qrDian}
+                </p>
+              </div>
+            )}
+
             {/* Desglose de Valores y Alerta Aritmética */}
             <div className="space-y-2 pt-1">
               <div className="grid grid-cols-3 gap-2">
@@ -656,14 +780,27 @@ export const WorkerExpenseForm: React.FC<Props> = ({
 
               {/* Indicador de comprobación aritmética */}
               {!estadoAritmetica.cuadra ? (
-                <div className="p-2 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl flex items-center justify-between text-[11px] text-amber-800 dark:text-amber-200">
-                  <div className="flex items-center gap-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
-                    <span>Diferencia: Neto + IVA no suma Total</span>
+                <div className="p-2.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl space-y-2 text-[11px] text-amber-800 dark:text-amber-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                      <span>Diferencia contable: Neto + IVA no suma Total</span>
+                    </div>
+                    <span className="font-bold">
+                      Descuadre: {formatCOP(estadoAritmetica.diferencia)}
+                    </span>
                   </div>
-                  <span className="font-bold">
-                    Descuadre: {formatCOP(estadoAritmetica.diferencia)}
-                  </span>
+                  <label className="flex items-center gap-2 cursor-pointer pt-1 border-t border-amber-200 dark:border-amber-800/60 text-slate-700 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={autorizarDiferenciaAritmetica}
+                      onChange={(e) => setAutorizarDiferenciaAritmetica(e.target.checked)}
+                      className="rounded text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="text-[10px] font-semibold">
+                      Autorizo radicar el gasto con diferencia aritmética justificada
+                    </span>
+                  </label>
                 </div>
               ) : (
                 <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold px-1">
@@ -783,6 +920,46 @@ export const WorkerExpenseForm: React.FC<Props> = ({
             )}
           </button>
         </form>
+      )}
+
+      {/* Modal de Zoom de Fotografía del Comprobante */}
+      {modalFotoZoom && fotoUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md cursor-zoom-out"
+          onClick={() => setModalFotoZoom(false)}
+        >
+          <div
+            className="bg-white dark:bg-slate-900 rounded-3xl max-w-xl w-full p-4 space-y-3 shadow-2xl border border-slate-200 dark:border-slate-800 cursor-default"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center border-b pb-2 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <Camera className="w-4 h-4 text-emerald-600" />
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Soporte Fotográfico Original
+                </h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalFotoZoom(false)}
+                className="p-1.5 rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="rounded-2xl overflow-hidden bg-slate-950 flex items-center justify-center max-h-[70vh]">
+              <img
+                src={fotoUrl}
+                alt="Comprobante en alta resolución"
+                className="max-h-[70vh] w-auto object-contain"
+              />
+            </div>
+            <div className="flex justify-between items-center text-[11px] text-slate-400">
+              <span>{emisor ? `${emisor} — ` : ''}{numeroFactura || 'Factura'}</span>
+              <span>Foto capturada en vivo</span>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

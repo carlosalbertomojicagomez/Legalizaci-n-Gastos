@@ -23,7 +23,8 @@ import {
   ExternalLink,
   ShieldCheck,
   UserCheck,
-  Cloud
+  Cloud,
+  QrCode
 } from 'lucide-react';
 
 interface Props {
@@ -32,6 +33,7 @@ interface Props {
   catalogs: { tiposGasto: string[]; tiposPago: string[] };
   onSaveCatalogs: (tiposGasto: string[], tiposPago: string[]) => Promise<void>;
   onAbrirDrive: () => void;
+  onAbrirSheets: () => void;
 }
 
 export const AdminDashboard: React.FC<Props> = ({
@@ -40,6 +42,7 @@ export const AdminDashboard: React.FC<Props> = ({
   catalogs,
   onSaveCatalogs,
   onAbrirDrive,
+  onAbrirSheets,
 }) => {
   // Modales
   const [gastoSeleccionado, setGastoSeleccionado] = useState<Gasto | null>(null);
@@ -51,6 +54,7 @@ export const AdminDashboard: React.FC<Props> = ({
   } | null>(null);
   const [comentarioAccion, setComentarioAccion] = useState('');
   const [procesandoAccion, setProcesandoAccion] = useState(false);
+  const [errorAccion, setErrorAccion] = useState<string | null>(null);
   const [copiadoCufe, setCopiadoCufe] = useState(false);
 
   // Filtros
@@ -154,8 +158,9 @@ export const AdminDashboard: React.FC<Props> = ({
 
   const handleEjecutarAccion = async () => {
     if (!modalAccion) return;
+    setErrorAccion(null);
     if (modalAccion.accion === 'rechazado' && !comentarioAccion.trim()) {
-      alert('Debe ingresar un motivo u observación para rechazar la factura.');
+      setErrorAccion('Debe ingresar un motivo u observación para rechazar la factura.');
       return;
     }
 
@@ -164,8 +169,9 @@ export const AdminDashboard: React.FC<Props> = ({
       await onActualizarEstado(modalAccion.id, modalAccion.accion, comentarioAccion.trim());
       setModalAccion(null);
       setComentarioAccion('');
+      setErrorAccion(null);
     } catch (err: any) {
-      alert('Error al actualizar estado: ' + err.message);
+      setErrorAccion('Error al actualizar estado: ' + err.message);
     } finally {
       setProcesandoAccion(false);
     }
@@ -212,6 +218,15 @@ export const AdminDashboard: React.FC<Props> = ({
           >
             <Cloud className="w-4 h-4" />
             <span>Google Drive</span>
+          </button>
+
+          <button
+            onClick={onAbrirSheets}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow-md transition active:scale-95"
+            title="Sincronizar y gestionar hojas en Google Sheets (Cloud)"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>Google Sheets</span>
           </button>
 
           <button
@@ -691,16 +706,32 @@ export const AdminDashboard: React.FC<Props> = ({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-start border-b pb-3 dark:border-slate-800">
-              <div>
-                <span className="text-[10px] font-bold uppercase text-emerald-600 dark:text-emerald-400">
-                  Comprobante DIAN
-                </span>
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase text-emerald-600 dark:text-emerald-400">
+                    Comprobante Fiscal DIAN
+                  </span>
+                  {gastoSeleccionado.confianza_extraccion && (
+                    <span
+                      className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${
+                        gastoSeleccionado.confianza_extraccion === 'alta'
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                          : 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
+                      }`}
+                    >
+                      IA: Confianza {gastoSeleccionado.confianza_extraccion}
+                    </span>
+                  )}
+                </div>
                 <h3 className="font-black text-lg text-slate-900 dark:text-white">
                   {gastoSeleccionado.emisor}
                 </h3>
-                <p className="text-xs text-slate-400 font-mono">
-                  Factura: {gastoSeleccionado.numero_factura}
-                </p>
+                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400 font-mono">
+                  <span>Factura: <strong className="text-slate-600 dark:text-slate-200">{gastoSeleccionado.numero_factura}</strong></span>
+                  {gastoSeleccionado.nit_emisor && (
+                    <span>NIT: <strong className="text-slate-600 dark:text-slate-200">{gastoSeleccionado.nit_emisor}</strong></span>
+                  )}
+                </div>
               </div>
               <button
                 onClick={() => setGastoSeleccionado(null)}
@@ -710,14 +741,28 @@ export const AdminDashboard: React.FC<Props> = ({
               </button>
             </div>
 
-            {/* Imagen ampliada */}
+            {/* Imagen ampliada con enlace directo al soporte original */}
             {gastoSeleccionado.foto_url && (
-              <div className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950 flex items-center justify-center max-h-[50vh]">
-                <img
-                  src={gastoSeleccionado.foto_url}
-                  alt="Factura completa"
-                  className="max-h-[50vh] w-auto object-contain"
-                />
+              <div className="space-y-1.5">
+                <div className="rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950 flex items-center justify-center max-h-[50vh] relative group">
+                  <img
+                    src={gastoSeleccionado.foto_url}
+                    alt="Factura original"
+                    className="max-h-[50vh] w-auto object-contain"
+                  />
+                  <a
+                    href={gastoSeleccionado.foto_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="absolute top-2 right-2 px-2.5 py-1 bg-black/70 hover:bg-black/90 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Ver Original</span>
+                  </a>
+                </div>
+                <span className="text-[10px] text-slate-400 block text-right">
+                  Foto física archivada en base de datos contable
+                </span>
               </div>
             )}
 
@@ -740,6 +785,19 @@ export const AdminDashboard: React.FC<Props> = ({
                 {gastoSeleccionado.cufe}
               </p>
             </div>
+
+            {/* Parámetros QR DIAN si existen */}
+            {gastoSeleccionado.qr_dian && (
+              <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-1">
+                <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 text-xs">
+                  <QrCode className="w-4 h-4 text-blue-500" />
+                  Cadena / Parámetros QR DIAN:
+                </span>
+                <p className="font-mono text-[9px] text-slate-600 dark:text-slate-300 break-all bg-white dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-700 select-all leading-tight">
+                  {gastoSeleccionado.qr_dian}
+                </p>
+              </div>
+            )}
 
             {/* Desglose contable */}
             <div className="grid grid-cols-3 gap-2 text-xs">
@@ -814,6 +872,12 @@ export const AdminDashboard: React.FC<Props> = ({
               onChange={(e) => setComentarioAccion(e.target.value)}
               className="w-full text-xs p-3 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900"
             />
+
+            {errorAccion && (
+              <p className="text-xs font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 p-2.5 rounded-xl border border-rose-200 dark:border-rose-800">
+                {errorAccion}
+              </p>
+            )}
 
             <div className="flex justify-end gap-2 pt-2">
               <button

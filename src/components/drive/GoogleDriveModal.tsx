@@ -56,9 +56,17 @@ export const GoogleDriveModal: React.FC<Props> = ({ isOpen, onClose, gastos }) =
   const [mensajeExito, setMensajeExito] = useState<string | null>(null);
   const [mensajeError, setMensajeError] = useState<string | null>(null);
 
-  // Modal para confirmar eliminación destructiva (REGLA MANDATORIA)
+  // Modales seguros en lugar de window.confirm/prompt/alert
   const [archivoAEliminar, setArchivoAEliminar] = useState<DriveFileItem | null>(null);
   const [eliminando, setEliminando] = useState(false);
+  const [dialogoConfirmar, setDialogoConfirmar] = useState<{
+    titulo: string;
+    mensaje: string;
+    onConfirm: () => Promise<void> | void;
+  } | null>(null);
+  const [mostrarCrearCarpeta, setMostrarCrearCarpeta] = useState(false);
+  const [nuevoNombreCarpeta, setNuevoNombreCarpeta] = useState('');
+  const [creandoCarpeta, setCreandoCarpeta] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -131,38 +139,37 @@ export const GoogleDriveModal: React.FC<Props> = ({ isOpen, onClose, gastos }) =
     setCarpetaActual(null);
   };
 
-  const handleCrearSubcarpeta = async () => {
-    const nombre = prompt('Ingrese el nombre de la nueva carpeta en Google Drive (ej: "Auditoría Octubre 2026"):');
-    if (!nombre || !nombre.trim()) return;
+  const handleCrearSubcarpeta = () => {
+    setNuevoNombreCarpeta('');
+    setMostrarCrearCarpeta(true);
+  };
 
+  const ejecutarCrearSubcarpeta = async () => {
+    if (!nuevoNombreCarpeta.trim()) return;
+    setCreandoCarpeta(true);
+    setMensajeError(null);
     try {
-      await crearCarpetaDrive(nombre.trim(), carpetaActual?.id);
-      setMensajeExito(`Carpeta "${nombre}" creada en Google Drive.`);
+      await crearCarpetaDrive(nuevoNombreCarpeta.trim(), carpetaActual?.id);
+      setMensajeExito(`Carpeta "${nuevoNombreCarpeta.trim()}" creada en Google Drive.`);
       setTimeout(() => setMensajeExito(null), 3000);
+      setMostrarCrearCarpeta(false);
+      setNuevoNombreCarpeta('');
       await cargarCarpetaYArchivos();
     } catch (err: any) {
-      alert('Error creando carpeta: ' + err.message);
+      setMensajeError('Error creando carpeta: ' + err.message);
+    } finally {
+      setCreandoCarpeta(false);
     }
   };
 
-  const handleSubirExcelADrive = async () => {
-    if (gastos.length === 0) {
-      alert('No hay gastos disponibles para exportar a Google Drive.');
-      return;
-    }
-
-    const confirmar = window.confirm(
-      `¿Desea generar y subir el reporte consolidado de ${gastos.length} comprobante(s) con imágenes incrustadas a la carpeta "${carpetaActual?.name || 'Drive'}"?`
-    );
-    if (!confirmar) return;
-
+  const ejecutarSubidaExcel = async () => {
     setSubiendoExcel(true);
     setMensajeError(null);
     try {
       const blob = await generarExcelBlob(gastos);
       const nombreArchivo = `Reporte_Gastos_DIAN_${new Date().toISOString().split('T')[0]}.xlsx`;
 
-      const archivoSubido = await respaldarReporteExcelEnDrive(
+      await respaldarReporteExcelEnDrive(
         blob,
         nombreArchivo,
         carpetaActual?.id
@@ -178,18 +185,20 @@ export const GoogleDriveModal: React.FC<Props> = ({ isOpen, onClose, gastos }) =
     }
   };
 
-  const handleRespaldarTodasLasFacturas = async () => {
-    const facturasConFoto = gastos.filter((g) => Boolean(g.foto_url));
-    if (facturasConFoto.length === 0) {
-      alert('No hay facturas con fotografía disponibles.');
+  const handleSubirExcelADrive = () => {
+    if (gastos.length === 0) {
+      setMensajeError('No hay gastos disponibles para exportar a Google Drive.');
       return;
     }
 
-    const confirmar = window.confirm(
-      `¿Desea respaldar las fotografías de las ${facturasConFoto.length} facturas registradas en la carpeta de Google Drive?`
-    );
-    if (!confirmar) return;
+    setDialogoConfirmar({
+      titulo: '¿Subir consolidado a Google Drive?',
+      mensaje: `¿Desea generar y subir el reporte consolidado de ${gastos.length} comprobante(s) con imágenes incrustadas a la carpeta "${carpetaActual?.name || 'Drive'}"?`,
+      onConfirm: ejecutarSubidaExcel,
+    });
+  };
 
+  const ejecutarRespaldoFotos = async (facturasConFoto: typeof gastos) => {
     setRespaldandoTodo(true);
     setMensajeError(null);
     setProgresoRespaldo({ total: facturasConFoto.length, actual: 0 });
@@ -217,6 +226,20 @@ export const GoogleDriveModal: React.FC<Props> = ({ isOpen, onClose, gastos }) =
     }
   };
 
+  const handleRespaldarTodasLasFacturas = () => {
+    const facturasConFoto = gastos.filter((g) => Boolean(g.foto_url));
+    if (facturasConFoto.length === 0) {
+      setMensajeError('No hay facturas con fotografía disponibles.');
+      return;
+    }
+
+    setDialogoConfirmar({
+      titulo: '¿Respaldar fotografías en Google Drive?',
+      mensaje: `¿Desea respaldar las fotografías de las ${facturasConFoto.length} facturas registradas en la carpeta de Google Drive?`,
+      onConfirm: () => ejecutarRespaldoFotos(facturasConFoto),
+    });
+  };
+
   // REGLA CRÍTICA: Confirmación explícita para operaciones destructivas
   const handleConfirmarEliminacion = async () => {
     if (!archivoAEliminar) return;
@@ -228,7 +251,7 @@ export const GoogleDriveModal: React.FC<Props> = ({ isOpen, onClose, gastos }) =
       setArchivoAEliminar(null);
       await cargarCarpetaYArchivos();
     } catch (err: any) {
-      alert('Error al eliminar archivo: ' + err.message);
+      setMensajeError('Error al eliminar archivo: ' + err.message);
     } finally {
       setEliminando(false);
     }
@@ -567,6 +590,93 @@ export const GoogleDriveModal: React.FC<Props> = ({ isOpen, onClose, gastos }) =
                       <span>Confirmar Eliminación</span>
                     </>
                   )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL SEGURO DE CONFIRMACIÓN DE OPERACIONES EN NUBE */}
+        {dialogoConfirmar && (
+          <div
+            className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            onClick={() => setDialogoConfirmar(null)}
+          >
+            <div
+              className="bg-white dark:bg-slate-800 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl border border-amber-300 dark:border-amber-800"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-2 text-amber-600">
+                <AlertTriangle className="w-6 h-6" />
+                <h3 className="font-black text-base text-slate-900 dark:text-white">
+                  {dialogoConfirmar.titulo}
+                </h3>
+              </div>
+
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                {dialogoConfirmar.mensaje}
+              </p>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setDialogoConfirmar(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={dialogoConfirmar.onConfirm}
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white shadow-md flex items-center gap-1.5"
+                >
+                  Confirmar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL PARA CREAR CARPETA EN DRIVE */}
+        {mostrarCrearCarpeta && (
+          <div
+            className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            onClick={() => setMostrarCrearCarpeta(false)}
+          >
+            <div
+              className="bg-white dark:bg-slate-800 rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl border border-slate-200 dark:border-slate-700"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="font-black text-base text-slate-900 dark:text-white">
+                Crear Nueva Carpeta en Drive
+              </h3>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                  Nombre de la carpeta
+                </label>
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="ej: Auditoría Octubre 2026"
+                  value={nuevoNombreCarpeta}
+                  onChange={(e) => setNuevoNombreCarpeta(e.target.value)}
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setMostrarCrearCarpeta(false)}
+                  disabled={creandoCarpeta}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={ejecutarCrearSubcarpeta}
+                  disabled={creandoCarpeta || !nuevoNombreCarpeta.trim()}
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-md disabled:opacity-50"
+                >
+                  {creandoCarpeta ? 'Creando...' : 'Crear Carpeta'}
                 </button>
               </div>
             </div>

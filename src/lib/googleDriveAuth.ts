@@ -13,16 +13,20 @@ import firebaseConfig from '../../firebase-applet-config.json';
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 
-// Scopes de Google Drive configurados
-export const DRIVE_SCOPES = [
+// Scopes de Google Workspace (Google Drive + Google Sheets)
+export const WORKSPACE_SCOPES = [
   'https://www.googleapis.com/auth/drive',
   'https://www.googleapis.com/auth/drive.file',
   'https://www.googleapis.com/auth/drive.metadata',
   'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/spreadsheets',
+  'https://www.googleapis.com/auth/spreadsheets.readonly',
 ];
 
+export const DRIVE_SCOPES = WORKSPACE_SCOPES;
+
 const provider = new GoogleAuthProvider();
-DRIVE_SCOPES.forEach((scope) => provider.addScope(scope));
+WORKSPACE_SCOPES.forEach((scope) => provider.addScope(scope));
 
 // Manejo de token en memoria (REGLA: NUNCA almacenar en localStorage/sessionStorage)
 let cachedAccessToken: string | null = null;
@@ -47,7 +51,7 @@ export const initDriveAuth = (
   });
 };
 
-export const signInWithGoogleDrive = async (): Promise<{
+export const signInWithGoogleWorkspace = async (): Promise<{
   user: User;
   accessToken: string;
 } | null> => {
@@ -56,24 +60,31 @@ export const signInWithGoogleDrive = async (): Promise<{
     const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
-      throw new Error('No se obtuvo el token de acceso OAuth para Google Drive');
+      throw new Error('No se obtuvo el token de acceso OAuth para Google Workspace');
     }
 
     cachedAccessToken = credential.accessToken;
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
-    console.error('Error al conectar con Google Drive:', error);
+    console.error('Error al conectar con Google Workspace:', error);
     throw error;
   } finally {
     isSigningIn = false;
   }
 };
 
+// Alias para compatibilidad previa
+export const signInWithGoogleDrive = signInWithGoogleWorkspace;
+
 export const getDriveAccessToken = async (): Promise<string | null> => {
   return cachedAccessToken;
 };
 
-export const logoutGoogleDrive = async () => {
+export const getWorkspaceAccessToken = getDriveAccessToken;
+
+export const logoutGoogleWorkspace = async () => {
   await signOut(auth);
   cachedAccessToken = null;
 };
+
+export const logoutGoogleDrive = logoutGoogleWorkspace;

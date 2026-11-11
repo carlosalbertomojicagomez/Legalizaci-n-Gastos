@@ -6,8 +6,10 @@ export interface Gasto {
   creado_en: string; // ISO string
   user_id: string;
   emisor: string;
+  nit_emisor?: string | null;
   numero_factura: string;
   cufe: string; // 96 hexadecimal characters
+  qr_dian?: string | null;
   fecha_emision: string; // YYYY-MM-DD
   fecha_vencimiento?: string | null;
   valor_neto: number; // COP
@@ -25,6 +27,7 @@ export interface Gasto {
   comentario_aprobacion?: string | null;
   actualizado_en?: string;
   actualizado_por?: string;
+  confianza_extraccion?: 'alta' | 'media' | 'baja';
 }
 
 export interface CatalogoData {
@@ -44,8 +47,10 @@ export interface UsuarioPerfil {
 
 export interface ExtractionResponse {
   emisor: string | null;
+  nit_emisor?: string | null;
   numero_factura: string | null;
   cufe: string | null;
+  qr_dian?: string | null;
   fecha_emision: string | null;
   fecha_vencimiento: string | null;
   valor_neto: number | null;
@@ -54,7 +59,10 @@ export interface ExtractionResponse {
   tipo_documento?: string | null;
   forma_pago?: string | null;
   medio_pago?: string | null;
-  confianza_cufe?: boolean;
+  concepto_sugerido?: string | null;
+  confianza_extraccion?: 'alta' | 'media' | 'baja';
+  mensaje_diagnostico?: string | null;
+  error_extraccion?: boolean;
 }
 
 export interface CufeCheckResult {
@@ -64,4 +72,16 @@ export interface CufeCheckResult {
   fecha_registro?: string;
   numero_factura?: string;
   emisor?: string;
+}
+
+export interface NotificacionItem {
+  id: string;
+  gastoId: string;
+  titulo: string;
+  mensaje: string;
+  tipo: 'aprobado' | 'rechazado' | 'info';
+  fecha: string;
+  leida: boolean;
+  emisor: string;
+  total: number;
 }

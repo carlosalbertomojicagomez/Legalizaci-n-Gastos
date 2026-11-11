@@ -1,4 +1,5 @@
 import express, { Request, Response } from 'express';
+import http from 'http';
 import { GoogleGenAI, Type } from '@google/genai';
 import path from 'path';
 import fs from 'fs';
@@ -25,7 +26,13 @@ const ai = new GoogleGenAI({
 
 // Directorio y archivo de persistencia local
 const DATA_DIR = path.resolve(process.cwd(), 'data');
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
+
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
+app.use('/uploads', express.static(UPLOADS_DIR));
 
 interface DatabaseSchema {
   expenses: any[];
@@ -200,7 +207,7 @@ app.get('/api/expenses/stream', (req: Request, res: Response) => {
   });
 });
 
-// 2. Extracción de Factura con IA de Visión (Gemini 3.8 Flash)
+// 2. Extracción de Factura con IA de Visión Real (Gemini 3.8 Flash)
 app.post('/api/extract-invoice', async (req: Request, res: Response) => {
   try {
     const { imageBase64, mimeType = 'image/jpeg' } = req.body;
@@ -210,30 +217,44 @@ app.post('/api/extract-invoice', async (req: Request, res: Response) => {
     }
 
     if (!process.env.GEMINI_API_KEY) {
-      console.warn('GEMINI_API_KEY no encontrada. Utilizando extractor de contingencia.');
-      res.status(200).json(generateFallbackExtraction());
+      res.status(503).json({
+        error: 'Servicio de reconocimiento visual no disponible: GEMINI_API_KEY no configurada.',
+        error_extraccion: true,
+        confianza_extraccion: 'baja',
+        mensaje_diagnostico: 'Configure la clave GEMINI_API_KEY en el servidor para habilitar el análisis visual automático.',
+      });
       return;
     }
 
     const cleanBase64 = imageBase64.replace(/^data:image\/[a-z]+;base64,/, '');
 
     const prompt = `
-Analiza detenidamente esta fotografía de factura física o electrónica de venta de Colombia.
-Tu objetivo es extraer de manera fiel y rigurosa los datos para la legalización contable ante la DIAN:
+Eres un auditor tributario y perito en Facturación Electrónica de la DIAN en Colombia.
+Analiza con el mayor rigor técnico la fotografía de esta factura física, electrónica o tiquete equivalente.
 
-1. "cufe": Es el Código Único de Factura Electrónica. Debe tener EXACTAMENTE 96 caracteres hexadecimales (dígitos 0-9 y letras a-f, sin espacios ni guiones). Copiarlo carácter por carácter tal como aparece o en la cadena del QR DIAN. Si no es 100% legible o no tiene exactamente 96 caracteres hex, devuelve null. NUNCA inventes o deduzcas caracteres.
-2. "emisor": Nombre comercial o razón social completa del proveedor o establecimiento emisor.
-3. "numero_factura": Prefijo y consecutivo de la factura (ej: FE-1029, SETT-882, B-450).
-4. "fecha_emision": Fecha en formato estándar YYYY-MM-DD.
-5. "fecha_vencimiento": Fecha de vencimiento si existe en formato YYYY-MM-DD, o null.
-6. "valor_neto": Subtotal o base gravable antes de impuestos como número (sin comas ni símbolos).
-7. "iva": Monto total liquidado por IVA como número (si no aplica o está exento, 0).
-8. "total": Total facturado en pesos colombianos (COP) como número.
-9. "tipo_documento": "01 - Factura Electrónica de Venta" o "05 - Documento Soporte" u "Otro".
-10. "forma_pago": "Contado" o "Crédito".
-11. "medio_pago": "Efectivo", "Tarjeta / Transferencia", "Bancarizado".
+INSTRUCCIONES DE EXTRACCIÓN REAL:
+1. "emisor": Nombre comercial o razón social completa del emisor/proveedor tal como aparece impreso en el encabezado.
+2. "nit_emisor": Número de Identificación Tributaria (NIT) del proveedor con o sin dígito de verificación (ej: "900.123.456-7" o "860000000-1").
+3. "numero_factura": Prefijo y consecutivo oficial de la factura (ej: "FE-1029", "SETP-9921", "B-4920", "POS-00129").
+4. "cufe": Código Único de Factura Electrónica (o CUDE si es documento soporte).
+   - Consta de exactamente 96 caracteres hexadecimales (dígitos 0-9 y letras a-f o A-F).
+   - Búscalo en el bloque de texto con la etiqueta "CUFE", "CUDE", "Código de Seguridad", o decodifica el parámetro "CUFE=" dentro de la cadena del código QR DIAN si está visible.
+   - Si identificas los 96 caracteres, devuélvelo en minúsculas sin espacios ni saltos de línea.
+   - Si no es 100% legible o no tiene exactamente 96 caracteres, devuelve null. NUNCA inventes caracteres.
+5. "qr_dian": Si la imagen contiene un código QR o la cadena de texto DIAN (ej: NumFac=...&NitFac=...&ValTolFac=...&CUFE=... o enlace de consulta catalogo-vpfe.dian.gov.co), extrae el texto completo o la URL. Si no existe, null.
+6. "fecha_emision": Fecha de emisión en formato estándar YYYY-MM-DD.
+7. "fecha_vencimiento": Fecha de vencimiento si aparece en formato YYYY-MM-DD, o null.
+8. "valor_neto": Subtotal o base gravable antes de impuestos como número en pesos colombianos COP (sin comas ni símbolos).
+9. "iva": Monto total liquidado por IVA o Impoconsumo como número en COP. Si está exento o no aplica, 0.
+10. "total": Total a pagar en pesos colombianos (COP) como número entero o flotante.
+11. "concepto_sugerido": Breve descripción del objeto o producto principal facturado (ej: "Combustible Diesel", "Alimentación viáticos", "Hospedaje", "Peaje vehicular", "Mantenimiento preventivo").
+12. "tipo_documento": "01 - Factura Electrónica de Venta", "05 - Documento Soporte" o "Tiquete POS / Equivalente".
+13. "forma_pago": "Contado" o "Crédito".
+14. "medio_pago": "Efectivo", "Tarjeta / Transferencia" o "Bancarizado".
+15. "confianza_extraccion": "alta" si el CUFE y total fueron claramente identificados, "media" si se leyó el total y emisor pero CUFE requiere verificación manual, "baja" si la foto está borrosa o ilegible.
+16. "mensaje_diagnostico": Explicación concisa en español de los campos identificados con certeza y advertencias sobre datos que requieran corroboración visual.
 
-REGLA ESTRICTA: Cualquier dato ilegible o no presente debe ser null. Jamás inventes valores.
+REGLA ESTRICTA: Lee ÚNICAMENTE lo que esté efectivamente plasmado en la fotografía. NUNCA inventes o deduzcas datos inexistentes.
 `;
 
     const response = await ai.models.generateContent({
@@ -255,16 +276,21 @@ REGLA ESTRICTA: Cualquier dato ilegible o no presente debe ser null. Jamás inve
           type: Type.OBJECT,
           properties: {
             emisor: { type: Type.STRING },
+            nit_emisor: { type: Type.STRING },
             numero_factura: { type: Type.STRING },
             cufe: { type: Type.STRING },
+            qr_dian: { type: Type.STRING },
             fecha_emision: { type: Type.STRING },
             fecha_vencimiento: { type: Type.STRING },
             valor_neto: { type: Type.NUMBER },
             iva: { type: Type.NUMBER },
             total: { type: Type.NUMBER },
+            concepto_sugerido: { type: Type.STRING },
             tipo_documento: { type: Type.STRING },
             forma_pago: { type: Type.STRING },
             medio_pago: { type: Type.STRING },
+            confianza_extraccion: { type: Type.STRING },
+            mensaje_diagnostico: { type: Type.STRING },
           },
         },
       },
@@ -275,47 +301,81 @@ REGLA ESTRICTA: Cualquier dato ilegible o no presente debe ser null. Jamás inve
     try {
       parsed = JSON.parse(text);
     } catch {
-      parsed = generateFallbackExtraction();
+      parsed = {
+        emisor: null,
+        nit_emisor: null,
+        numero_factura: null,
+        cufe: null,
+        qr_dian: null,
+        fecha_emision: new Date().toISOString().split('T')[0],
+        fecha_vencimiento: null,
+        valor_neto: 0,
+        iva: 0,
+        total: 0,
+        confianza_extraccion: 'baja',
+        mensaje_diagnostico: 'No se pudo interpretar el formato JSON de la respuesta de IA.',
+      };
     }
 
-    // Validación y sanitización estricta del CUFE en servidor
+    // Post-procesamiento y validación rigurosa del CUFE (96 caracteres hexadecimales)
+    let cufeEncontrado: string | null = null;
+
     if (parsed.cufe) {
       const cufeClean = String(parsed.cufe).trim().toLowerCase().replace(/[^a-f0-9]/g, '');
       if (cufeClean.length === 96) {
-        parsed.cufe = cufeClean;
-      } else {
-        parsed.cufe = null;
+        cufeEncontrado = cufeClean;
+      }
+    }
+
+    // Si no vino en el campo cufe directo, buscar en qr_dian o en el texto crudo
+    if (!cufeEncontrado && parsed.qr_dian) {
+      const matchQr = String(parsed.qr_dian).match(/[a-fA-F0-9]{96}/);
+      if (matchQr) {
+        cufeEncontrado = matchQr[0].toLowerCase();
+      }
+    }
+
+    // Asignar el CUFE validado o null si no cumplió los 96 caracteres
+    parsed.cufe = cufeEncontrado;
+
+    // Ajustar diagnóstico de confianza
+    if (parsed.cufe && parsed.total > 0 && parsed.emisor) {
+      parsed.confianza_extraccion = 'alta';
+      if (!parsed.mensaje_diagnostico) {
+        parsed.mensaje_diagnostico = 'Factura leída con éxito: CUFE de 96 caracteres, valores y emisor confirmados.';
+      }
+    } else if (parsed.total > 0 && parsed.emisor) {
+      parsed.confianza_extraccion = 'media';
+      if (!parsed.mensaje_diagnostico) {
+        parsed.mensaje_diagnostico = 'Se identificó el proveedor y valores. El CUFE de 96 caracteres requiere verificación manual.';
+      }
+    } else {
+      parsed.confianza_extraccion = 'baja';
+      if (!parsed.mensaje_diagnostico) {
+        parsed.mensaje_diagnostico = 'La foto requiere mejor iluminación o enfoque para leer todos los datos fiscales.';
       }
     }
 
     res.json(parsed);
   } catch (error: any) {
-    console.error('Error en extracción con Gemini Vision:', error);
-    res.status(200).json(generateFallbackExtraction());
+    console.error('Error en extracción real con Gemini Vision:', error);
+    res.status(200).json({
+      emisor: null,
+      nit_emisor: null,
+      numero_factura: null,
+      cufe: null,
+      qr_dian: null,
+      fecha_emision: new Date().toISOString().split('T')[0],
+      fecha_vencimiento: null,
+      valor_neto: 0,
+      iva: 0,
+      total: 0,
+      confianza_extraccion: 'baja',
+      mensaje_diagnostico: `Aviso del motor de visión: ${error.message || 'Error al procesar la imagen'}. Por favor revise la fotografía adjunta y complete los campos.`,
+      error_extraccion: true,
+    });
   }
 });
-
-function generateFallbackExtraction() {
-  const hexChars = '0123456789abcdef';
-  let randomCufe = '';
-  for (let i = 0; i < 96; i++) {
-    randomCufe += hexChars[Math.floor(Math.random() * hexChars.length)];
-  }
-  return {
-    emisor: 'ESTACIÓN DE SERVICIO TERPEL SUR S.A.',
-    numero_factura: 'TERP-' + Math.floor(10000 + Math.random() * 90000),
-    cufe: randomCufe,
-    fecha_emision: new Date().toISOString().split('T')[0],
-    fecha_vencimiento: null,
-    valor_neto: 145000,
-    iva: 27550,
-    total: 172550,
-    tipo_documento: '01 - Factura Electrónica de Venta',
-    forma_pago: 'Contado',
-    medio_pago: 'Efectivo / Caja menor',
-    detalles_observados: 'Lectura asistida completada.',
-  };
-}
 
 // 3. Verificación de CUFE duplicado
 app.get('/api/check-cufe/:cufe', (req: Request, res: Response) => {
@@ -407,13 +467,31 @@ app.post('/api/expenses', (req: Request, res: Response) => {
     return;
   }
 
+  let fotoPath = body.foto_path || `factura_${Date.now()}.jpg`;
+  if (body.foto_url && typeof body.foto_url === 'string' && body.foto_url.startsWith('data:image/')) {
+    try {
+      const match = body.foto_url.match(/^data:image\/(\w+);base64,(.+)$/);
+      if (match) {
+        const ext = match[1] === 'png' ? 'png' : 'jpg';
+        const fileName = `factura_${Date.now()}_${cufeLimpio.substring(0, 8)}.${ext}`;
+        const filePath = path.join(UPLOADS_DIR, fileName);
+        fs.writeFileSync(filePath, Buffer.from(match[2], 'base64'));
+        fotoPath = `/uploads/${fileName}`;
+      }
+    } catch (e) {
+      console.warn('Error al guardar archivo en disco:', e);
+    }
+  }
+
   const nuevoGasto = {
     id: body.id || 'exp-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
     creado_en: body.creado_en || new Date().toISOString(),
     user_id: body.user_id || 'usr_trabajador',
     emisor: String(body.emisor || '').trim(),
+    nit_emisor: String(body.nit_emisor || '').trim() || null,
     numero_factura: String(body.numero_factura || '').trim(),
     cufe: cufeLimpio,
+    qr_dian: body.qr_dian || null,
     fecha_emision: body.fecha_emision || new Date().toISOString().split('T')[0],
     fecha_vencimiento: body.fecha_vencimiento || null,
     valor_neto: Number(body.valor_neto) || 0,
@@ -424,9 +502,10 @@ app.post('/api/expenses', (req: Request, res: Response) => {
     tipo_gasto: body.tipo_gasto || 'Alimentación / Viáticos',
     tipo_pago: body.tipo_pago || 'Efectivo / Caja menor',
     objeto: String(body.objeto || '').trim(),
-    foto_path: body.foto_path || 'evidencia.jpg',
-    foto_url: body.foto_url || '',
+    foto_path: fotoPath,
+    foto_url: body.foto_url || fotoPath,
     foto_tomada_en: body.foto_tomada_en || new Date().toISOString(),
+    confianza_extraccion: body.confianza_extraccion || 'alta',
     estado: 'pendiente',
     comentario_aprobacion: null,
   };
@@ -487,10 +566,16 @@ app.post('/api/catalogs', (req: Request, res: Response) => {
 // MONTAJE DE VITE / PRODUCCIÓN
 // ==========================================
 async function startServer() {
+  const httpServer = http.createServer(app);
+
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
+    const isHmrDisabled = process.env.DISABLE_HMR === 'true';
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: isHmrDisabled ? false : { server: httpServer },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -502,7 +587,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor de Legalización de Gastos activo en http://0.0.0.0:${PORT}`);
   });
 }

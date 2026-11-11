@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Camera, RefreshCw, ShieldAlert, Zap, ZapOff, ArrowLeft } from 'lucide-react';
+import { Camera, RefreshCw, ShieldAlert, Zap, ZapOff, ArrowLeft, Upload } from 'lucide-react';
 import { comprimirImagen } from '../../utils/imageCompressor';
 
 interface LiveCameraProps {
@@ -15,6 +15,7 @@ interface LiveCameraProps {
 
 export const LiveCamera: React.FC<LiveCameraProps> = ({ onCapture, onCancel }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [cargando, setCargando] = useState(true);
   const [permisoDenegado, setPermisoDenegado] = useState(false);
@@ -139,6 +140,40 @@ export const LiveCamera: React.FC<LiveCameraProps> = ({ onCapture, onCancel }) =
     }
   };
 
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setCargando(true);
+    setMensajeError(null);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const rawDataUrl = reader.result as string;
+          const fechaCaptura = new Date().toISOString();
+          detenerStream();
+
+          const resultado = await comprimirImagen(rawDataUrl, 1600, 0.85);
+          onCapture({
+            dataUrl: resultado.dataUrl,
+            base64: resultado.base64,
+            capturedAt: fechaCaptura,
+            width: resultado.width,
+            height: resultado.height,
+          });
+        } catch (err: any) {
+          setMensajeError('Error al procesar la imagen seleccionada: ' + err.message);
+          setCargando(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      setMensajeError('Error al leer el archivo: ' + err.message);
+      setCargando(false);
+    }
+  };
+
   if (permisoDenegado) {
     return (
       <div className="max-w-md mx-auto p-6 bg-rose-50 dark:bg-rose-950/40 rounded-3xl border border-rose-200 dark:border-rose-900 text-center space-y-4">
@@ -164,20 +199,39 @@ export const LiveCamera: React.FC<LiveCameraProps> = ({ onCapture, onCancel }) =
           </ul>
         </div>
 
-        <div className="flex gap-2 pt-2">
+        <div className="flex flex-col gap-2 pt-2">
           <button
-            onClick={onCancel}
-            className="flex-1 py-3 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs"
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs shadow-md transition flex items-center justify-center gap-2 active:scale-95"
           >
-            Regresar
+            <Upload className="w-4 h-4" />
+            <span>Seleccionar Foto o Archivo de Factura</span>
           </button>
-          <button
-            onClick={iniciarCamara}
-            className="flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-md transition"
-          >
-            Reintentar Acceso
-          </button>
+
+          <div className="flex gap-2">
+            <button
+              onClick={onCancel}
+              className="flex-1 py-2.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs"
+            >
+              Regresar
+            </button>
+            <button
+              onClick={iniciarCamara}
+              className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-md transition"
+            >
+              Reintentar Cámara
+            </button>
+          </div>
         </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleFileSelect}
+        />
       </div>
     );
   }
@@ -252,8 +306,17 @@ export const LiveCamera: React.FC<LiveCameraProps> = ({ onCapture, onCancel }) =
         </button>
       )}
 
-      {/* Disparador táctil */}
-      <div className="absolute bottom-6 w-full flex justify-center items-center z-30 px-6">
+      {/* Disparador táctil y botón de carga de archivo */}
+      <div className="absolute bottom-6 w-full flex justify-between items-center z-30 px-8">
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="p-3 bg-black/60 hover:bg-black/80 active:scale-95 text-white rounded-full backdrop-blur-md transition flex items-center justify-center border border-white/20"
+          title="Subir archivo o foto de factura"
+        >
+          <Upload className="w-5 h-5 text-emerald-400" />
+        </button>
+
         <button
           onClick={dispararFoto}
           disabled={cargando || disparando || Boolean(mensajeError)}
@@ -268,7 +331,17 @@ export const LiveCamera: React.FC<LiveCameraProps> = ({ onCapture, onCancel }) =
             )}
           </div>
         </button>
+
+        <div className="w-11" /> {/* Equilibrador de espacio */}
       </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFileSelect}
+      />
     </div>
   );
 };

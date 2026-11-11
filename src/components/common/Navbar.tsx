@@ -1,6 +1,7 @@
 import React from 'react';
-import { RolUsuario, UsuarioPerfil } from '../../types';
+import { RolUsuario, UsuarioPerfil, NotificacionItem } from '../../types';
 import { PWAInstallButton } from './PWAInstallButton';
+import { NotificationBell } from '../notifications/NotificationBell';
 import {
   Sun,
   Moon,
@@ -10,7 +11,8 @@ import {
   WifiOff,
   RefreshCw,
   FlaskConical,
-  Cloud
+  Cloud,
+  FileSpreadsheet
 } from 'lucide-react';
 
 interface Props {
@@ -20,12 +22,17 @@ interface Props {
   onAbrirUsuarioModal: () => void;
   onAbrirTestsModal: () => void;
   onAbrirDriveModal: () => void;
+  onAbrirSheetsModal: () => void;
   temaOscuro: boolean;
   onToggleTema: () => void;
   isOnline: boolean;
   colaOfflineCount: number;
   onSincronizarOffline: () => void;
   sincronizando: boolean;
+  notificaciones: NotificacionItem[];
+  onLimpiarNotificaciones: () => void;
+  onMarcarNotificacionLeida: (id: string) => void;
+  onMarcarTodasNotificacionesLeidas: () => void;
 }
 
 export const Navbar: React.FC<Props> = ({
@@ -35,12 +42,17 @@ export const Navbar: React.FC<Props> = ({
   onAbrirUsuarioModal,
   onAbrirTestsModal,
   onAbrirDriveModal,
+  onAbrirSheetsModal,
   temaOscuro,
   onToggleTema,
   isOnline,
   colaOfflineCount,
   onSincronizarOffline,
   sincronizando,
+  notificaciones,
+  onLimpiarNotificaciones,
+  onMarcarNotificacionLeida,
+  onMarcarTodasNotificacionesLeidas,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-3 sm:px-6 py-2.5 transition-colors">
@@ -110,6 +122,16 @@ export const Navbar: React.FC<Props> = ({
             <span className="hidden sm:inline">Drive</span>
           </button>
 
+          {/* Botón Google Sheets */}
+          <button
+            onClick={onAbrirSheetsModal}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-bold transition active:scale-95"
+            title="Google Sheets: sincronizar hoja de cálculo contable en la nube"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span className="hidden sm:inline">Sheets</span>
+          </button>
+
           {/* Botón PWA Install */}
           <PWAInstallButton />
 
@@ -138,6 +160,14 @@ export const Navbar: React.FC<Props> = ({
               <span className="hidden sm:inline">Admin</span>
             </button>
           </div>
+
+          {/* Campana de Notificaciones Web y de Estado */}
+          <NotificationBell
+            notificaciones={notificaciones}
+            onLimpiarNotificaciones={onLimpiarNotificaciones}
+            onMarcarLeida={onMarcarNotificacionLeida}
+            onMarcarTodasLeidas={onMarcarTodasNotificacionesLeidas}
+          />
 
           {/* Badge del Usuario / Perfil */}
           <button

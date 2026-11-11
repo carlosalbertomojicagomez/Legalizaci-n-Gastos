@@ -20,6 +20,7 @@ export async function generarExcelBlob(gastos: Gasto[]): Promise<Blob> {
     { header: 'Responsable', key: 'nombre_responsable', width: 24 },
     { header: 'Cargo', key: 'cargo', width: 20 },
     { header: 'Emisor / Proveedor', key: 'emisor', width: 28 },
+    { header: 'NIT Emisor', key: 'nit_emisor', width: 18 },
     { header: 'N° Factura', key: 'numero_factura', width: 16 },
     { header: 'Fecha Emisión', key: 'fecha_emision', width: 15 },
     { header: 'Fecha Vencimiento', key: 'fecha_vencimiento', width: 16 },
@@ -60,6 +61,7 @@ export async function generarExcelBlob(gastos: Gasto[]): Promise<Blob> {
       nombre_responsable: g.nombre_responsable,
       cargo: g.cargo,
       emisor: g.emisor,
+      nit_emisor: g.nit_emisor || 'N/A',
       numero_factura: g.numero_factura,
       fecha_emision: g.fecha_emision,
       fecha_vencimiento: g.fecha_vencimiento || 'N/A',
@@ -73,9 +75,9 @@ export async function generarExcelBlob(gastos: Gasto[]): Promise<Blob> {
       foto: '',
     });
 
-    row.getCell(12).numFmt = '"$"#,##0';
     row.getCell(13).numFmt = '"$"#,##0';
     row.getCell(14).numFmt = '"$"#,##0';
+    row.getCell(15).numFmt = '"$"#,##0';
 
     row.height = 98;
     row.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
@@ -95,15 +97,16 @@ export async function generarExcelBlob(gastos: Gasto[]): Promise<Blob> {
         let base64Clean = '';
         if (g.foto_url.startsWith('data:image/')) {
           base64Clean = g.foto_url.split(',')[1];
-        } else if (g.foto_url.startsWith('http')) {
-          const resp = await fetch(g.foto_url);
+        } else if (g.foto_url.startsWith('http') || g.foto_url.startsWith('/')) {
+          const fetchUrl = g.foto_url.startsWith('/') ? window.location.origin + g.foto_url : g.foto_url;
+          const resp = await fetch(fetchUrl);
           const arrayBuffer = await resp.arrayBuffer();
           const imgId = workbook.addImage({
             buffer: arrayBuffer,
             extension: 'jpeg',
           });
           worksheet.addImage(imgId, {
-            tl: { col: 15.05, row: rowIndex - 0.95 },
+            tl: { col: 16.05, row: rowIndex - 0.95 },
             ext: { width: 125, height: 92 },
             editAs: 'oneCell',
           });
@@ -116,7 +119,7 @@ export async function generarExcelBlob(gastos: Gasto[]): Promise<Blob> {
             extension: 'jpeg',
           });
           worksheet.addImage(imgId, {
-            tl: { col: 15.05, row: rowIndex - 0.95 },
+            tl: { col: 16.05, row: rowIndex - 0.95 },
             ext: { width: 125, height: 92 },
             editAs: 'oneCell',
           });
