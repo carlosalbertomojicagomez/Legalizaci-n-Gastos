@@ -13,7 +13,7 @@ import firebaseConfig from '../../firebase-applet-config.json';
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 
-// Scopes de Google Workspace (Google Drive + Google Sheets)
+// Scopes de Google Workspace (Google Drive + Google Sheets + Google Chat)
 export const WORKSPACE_SCOPES = [
   'https://www.googleapis.com/auth/drive',
   'https://www.googleapis.com/auth/drive.file',
@@ -21,6 +21,14 @@ export const WORKSPACE_SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/spreadsheets',
   'https://www.googleapis.com/auth/spreadsheets.readonly',
+  'https://www.googleapis.com/auth/chat.spaces',
+  'https://www.googleapis.com/auth/chat.spaces.readonly',
+  'https://www.googleapis.com/auth/chat.spaces.create',
+  'https://www.googleapis.com/auth/chat.messages',
+  'https://www.googleapis.com/auth/chat.messages.create',
+  'https://www.googleapis.com/auth/chat.messages.readonly',
+  'https://www.googleapis.com/auth/chat.memberships',
+  'https://www.googleapis.com/auth/chat.memberships.readonly',
 ];
 
 export const DRIVE_SCOPES = WORKSPACE_SCOPES;
