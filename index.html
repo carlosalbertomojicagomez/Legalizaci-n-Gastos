@@ -13,7 +13,7 @@
     <meta name="twitter:card" content="summary_large_image" />
 
     <!-- PWA & Mobile Web Capabilities -->
-    <meta name="theme-color" content="#0a2540" />
+    <meta name="theme-color" content="#07426B" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -21,27 +21,43 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <script>
-      // En entornos Cloud Run / iframe el HMR por WebSockets está deshabilitado por diseño;
-      // interceptamos el aviso de conexión cerrada para evitar alertas espurias en consola.
-      window.addEventListener('error', function (event) {
-        if (
-          event?.message?.includes('WebSocket closed without opened') ||
-          (typeof event?.message === 'string' && event.message.includes('[vite]'))
-        ) {
-          event.stopImmediatePropagation();
-          event.preventDefault();
-          return true;
-        }
-      }, true);
-      window.addEventListener('unhandledrejection', function (event) {
-        if (
-          event?.reason?.message?.includes('WebSocket closed without opened') ||
-          (typeof event?.reason?.message === 'string' && event.reason.message.includes('[vite]'))
-        ) {
-          event.stopImmediatePropagation();
-          event.preventDefault();
-        }
-      }, true);
+      // En entornos Cloud Run / iframe el HMR por WebSockets está deshabilitado por diseño.
+      // Interceptamos y silenciamos avisos espurios de WebSocket cerrado sin abrir.
+      (function() {
+        var origConsoleError = console.error;
+        console.error = function() {
+          var msg = arguments[0];
+          if (
+            (typeof msg === 'string' && (msg.includes('WebSocket closed without opened') || msg.includes('[vite]'))) ||
+            (msg instanceof Error && (msg.message.includes('WebSocket closed without opened') || msg.message.includes('[vite]')))
+          ) {
+            return;
+          }
+          origConsoleError.apply(console, arguments);
+        };
+
+        window.addEventListener('error', function (event) {
+          if (
+            event?.message?.includes('WebSocket closed without opened') ||
+            (typeof event?.message === 'string' && event.message.includes('[vite]')) ||
+            event?.error?.message?.includes('WebSocket closed without opened')
+          ) {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+            return true;
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function (event) {
+          if (
+            event?.reason?.message?.includes('WebSocket closed without opened') ||
+            (typeof event?.reason?.message === 'string' && event.reason.message.includes('[vite]'))
+          ) {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+          }
+        }, true);
+      })();
     </script>
   </head>
   <body class="bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 antialiased min-h-screen selection:bg-blue-600 selection:text-white">

@@ -1,15 +1,16 @@
 import ExcelJS from 'exceljs';
 import { Gasto } from '../types';
+import { getIdToken } from '../lib/firebaseClient';
 
 /**
- * Genera el Blob binario del libro Excel (.xlsx) con fotografías incrustadas
+ * Genera el Blob binario del libro Excel (.xlsx) con fotografías incrustadas y diseño corporativo Colaves
  */
 export async function generarExcelBlob(gastos: Gasto[]): Promise<Blob> {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'Legalización de Gastos PWA - DIAN Colombia';
+  workbook.creator = 'Colaves S.A.S. - Legalización de Gastos DIAN';
   workbook.created = new Date();
 
-  const worksheet = workbook.addWorksheet('Gastos', {
+  const worksheet = workbook.addWorksheet('Gastos Colaves', {
     views: [{ showGridLines: true }],
   });
 
@@ -31,19 +32,21 @@ export async function generarExcelBlob(gastos: Gasto[]): Promise<Blob> {
     { header: 'IVA (COP)', key: 'iva', width: 16 },
     { header: 'Total (COP)', key: 'total', width: 18 },
     { header: 'CUFE (DIAN 96 Hex)', key: 'cufe', width: 38 },
-    { header: 'Evidencia (Factura)', key: 'foto', width: 22 },
+    { header: 'Evidencia (Factura)', key: 'foto', width: 24 },
   ];
 
-  // Estilo corporativo de cabecera (Azul DIAN / Corporativo)
+  // Estilo corporativo de cabecera (Azul Oficial Colaves #07426B)
   const headerRow = worksheet.getRow(1);
-  headerRow.height = 30;
+  headerRow.height = 32;
   headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
   headerRow.fill = {
     type: 'pattern',
     pattern: 'solid',
-    fgColor: { argb: 'FF0A2540' },
+    fgColor: { argb: 'FF07426B' },
   };
   headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+
+  const token = await getIdToken();
 
   for (let i = 0; i < gastos.length; i++) {
     const g = gastos[i];
@@ -79,13 +82,13 @@ export async function generarExcelBlob(gastos: Gasto[]): Promise<Blob> {
     row.getCell(14).numFmt = '"$"#,##0';
     row.getCell(15).numFmt = '"$"#,##0';
 
-    row.height = 98;
+    row.height = 100;
     row.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
 
     const estadoCell = row.getCell(2);
     estadoCell.alignment = { vertical: 'middle', horizontal: 'center' };
     if (g.estado === 'aprobado') {
-      estadoCell.font = { bold: true, color: { argb: 'FF047857' } };
+      estadoCell.font = { bold: true, color: { argb: 'FF206A3C' } };
     } else if (g.estado === 'rechazado') {
       estadoCell.font = { bold: true, color: { argb: 'FFB91C1C' } };
     } else {
@@ -98,19 +101,26 @@ export async function generarExcelBlob(gastos: Gasto[]): Promise<Blob> {
         if (g.foto_url.startsWith('data:image/')) {
           base64Clean = g.foto_url.split(',')[1];
         } else if (g.foto_url.startsWith('http') || g.foto_url.startsWith('/')) {
-          const fetchUrl = g.foto_url.startsWith('/') ? window.location.origin + g.foto_url : g.foto_url;
+          let fetchUrl = g.foto_url.startsWith('/') ? window.location.origin + g.foto_url : g.foto_url;
+          if (token && fetchUrl.includes('/api/expenses/')) {
+            const sep = fetchUrl.includes('?') ? '&' : '?';
+            fetchUrl = `${fetchUrl}${sep}token=${encodeURIComponent(token)}`;
+          }
+
           const resp = await fetch(fetchUrl);
-          const arrayBuffer = await resp.arrayBuffer();
-          const imgId = workbook.addImage({
-            buffer: arrayBuffer,
-            extension: 'jpeg',
-          });
-          worksheet.addImage(imgId, {
-            tl: { col: 16.05, row: rowIndex - 0.95 },
-            ext: { width: 125, height: 92 },
-            editAs: 'oneCell',
-          });
-          continue;
+          if (resp.ok) {
+            const arrayBuffer = await resp.arrayBuffer();
+            const imgId = workbook.addImage({
+              buffer: arrayBuffer,
+              extension: 'jpeg',
+            });
+            worksheet.addImage(imgId, {
+              tl: { col: 16.05, row: rowIndex - 0.95 },
+              ext: { width: 130, height: 94 },
+              editAs: 'oneCell',
+            });
+            continue;
+          }
         }
 
         if (base64Clean) {
@@ -120,7 +130,7 @@ export async function generarExcelBlob(gastos: Gasto[]): Promise<Blob> {
           });
           worksheet.addImage(imgId, {
             tl: { col: 16.05, row: rowIndex - 0.95 },
-            ext: { width: 125, height: 92 },
+            ext: { width: 130, height: 94 },
             editAs: 'oneCell',
           });
         }
@@ -141,7 +151,7 @@ export async function generarExcelBlob(gastos: Gasto[]): Promise<Blob> {
  */
 export async function exportarGastosAExcel(
   gastos: Gasto[],
-  nombreArchivo = 'Legalizaciones_Gastos_DIAN.xlsx'
+  nombreArchivo = 'Legalizaciones_Colaves_DIAN.xlsx'
 ): Promise<void> {
   const blob = await generarExcelBlob(gastos);
   const downloadUrl = URL.createObjectURL(blob);

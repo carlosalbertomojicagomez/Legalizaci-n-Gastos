@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { Camera, RefreshCw, ShieldAlert, Zap, ZapOff, ArrowLeft, Upload } from 'lucide-react';
+import { Camera, RefreshCw, ShieldAlert, Zap, ZapOff, ArrowLeft, Eye, HelpCircle } from 'lucide-react';
 import { comprimirImagen } from '../../utils/imageCompressor';
 
 interface LiveCameraProps {
@@ -15,7 +15,6 @@ interface LiveCameraProps {
 
 export const LiveCamera: React.FC<LiveCameraProps> = ({ onCapture, onCancel }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [cargando, setCargando] = useState(true);
   const [permisoDenegado, setPermisoDenegado] = useState(false);
@@ -23,6 +22,7 @@ export const LiveCamera: React.FC<LiveCameraProps> = ({ onCapture, onCancel }) =
   const [disparando, setDisparando] = useState(false);
   const [linternaActiva, setLinternaActiva] = useState(false);
   const [soportaLinterna, setSoportaLinterna] = useState(false);
+  const [mostrarAyudaPermisos, setMostrarAyudaPermisos] = useState(false);
 
   const detenerStream = useCallback(() => {
     if (stream) {
@@ -56,7 +56,7 @@ export const LiveCamera: React.FC<LiveCameraProps> = ({ onCapture, onCancel }) =
         videoRef.current.srcObject = mediaStream;
       }
 
-      // Detectar soporte para antorcha/linterna
+      // Detectar antorcha/linterna
       const videoTrack = mediaStream.getVideoTracks()[0];
       const capabilities = (videoTrack?.getCapabilities && videoTrack.getCapabilities()) as any;
       if (capabilities && capabilities.torch) {
@@ -72,7 +72,7 @@ export const LiveCamera: React.FC<LiveCameraProps> = ({ onCapture, onCancel }) =
         setPermisoDenegado(true);
       } else {
         setMensajeError(
-          'No se pudo activar la cámara trasera. Asegúrese de que no esté en uso por otra app.'
+          'No se pudo activar la cámara trasera del dispositivo. Verifique que otra aplicación no la esté bloqueando.'
         );
       }
     } finally {
@@ -123,7 +123,7 @@ export const LiveCamera: React.FC<LiveCameraProps> = ({ onCapture, onCancel }) =
       // Detener stream para liberar hardware
       detenerStream();
 
-      // Comprimir a máximo 1600px en su dimensión mayor según requerimiento
+      // Compresión fotográfica a máximo 1600px en su dimensión mayor
       const resultado = await comprimirImagen(rawDataUrl, 1600, 0.85);
 
       onCapture({
@@ -140,208 +140,138 @@ export const LiveCamera: React.FC<LiveCameraProps> = ({ onCapture, onCancel }) =
     }
   };
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setCargando(true);
-    setMensajeError(null);
-    try {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          const rawDataUrl = reader.result as string;
-          const fechaCaptura = new Date().toISOString();
-          detenerStream();
-
-          const resultado = await comprimirImagen(rawDataUrl, 1600, 0.85);
-          onCapture({
-            dataUrl: resultado.dataUrl,
-            base64: resultado.base64,
-            capturedAt: fechaCaptura,
-            width: resultado.width,
-            height: resultado.height,
-          });
-        } catch (err: any) {
-          setMensajeError('Error al procesar la imagen seleccionada: ' + err.message);
-          setCargando(false);
-        }
-      };
-      reader.readAsDataURL(file);
-    } catch (err: any) {
-      setMensajeError('Error al leer el archivo: ' + err.message);
-      setCargando(false);
-    }
-  };
-
   if (permisoDenegado) {
     return (
-      <div className="max-w-md mx-auto p-6 bg-rose-50 dark:bg-rose-950/40 rounded-3xl border border-rose-200 dark:border-rose-900 text-center space-y-4">
-        <div className="w-16 h-16 mx-auto rounded-2xl bg-rose-100 dark:bg-rose-900/60 flex items-center justify-center text-rose-600 dark:text-rose-400">
-          <ShieldAlert className="w-9 h-9" />
+      <div className="max-w-md mx-auto p-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 text-center space-y-5 shadow-xl">
+        <div className="w-16 h-16 mx-auto rounded-3xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900/60 flex items-center justify-center text-amber-600">
+          <ShieldAlert className="w-8 h-8" />
         </div>
-        <h3 className="text-lg font-black text-rose-950 dark:text-rose-100">
-          Permiso de Cámara Requerido
-        </h3>
-        <p className="text-xs text-rose-700 dark:text-rose-300 leading-relaxed">
-          Para garantizar la integridad y trazabilidad fiscal exigida por la DIAN, las facturas deben
-          fotografiarse en vivo con la cámara trasera. <strong>No está permitido cargar archivos desde la galería.</strong>
-        </p>
-
-        <div className="text-left bg-white dark:bg-slate-900 p-4 rounded-2xl text-xs space-y-2 border border-rose-200 dark:border-rose-900/60 shadow-sm">
-          <p className="font-bold text-slate-800 dark:text-slate-200">
-            ¿Cómo autorizar la cámara en tu celular?
+        
+        <div className="space-y-1">
+          <h3 className="text-lg font-black text-slate-900 dark:text-white">
+            Cámara en Vivo Requerida
+          </h3>
+          <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed max-w-sm mx-auto">
+            Por estricta política de control fiscal y trazabilidad DIAN en <strong>Colaves</strong>, la factura debe capturarse en tiempo real mediante la cámara trasera del dispositivo. <strong>No se permite la selección de archivos de galería.</strong>
           </p>
-          <ul className="list-disc pl-4 space-y-1 text-slate-600 dark:text-slate-400">
-            <li>Toca el candado o icono de configuración en la barra de direcciones de tu navegador.</li>
-            <li>Selecciona <strong>Permisos</strong> o <strong>Cámara</strong>.</li>
-            <li>Elige <strong>Permitir</strong> y luego presiona el botón Reintentar.</li>
+        </div>
+
+        <div className="text-left bg-slate-50 dark:bg-slate-800/80 p-4 rounded-2xl text-xs space-y-2 border border-slate-200 dark:border-slate-700">
+          <p className="font-bold text-[#07426B] dark:text-blue-300 flex items-center gap-1.5">
+            <HelpCircle className="w-4 h-4" />
+            ¿Cómo autorizar la cámara en el navegador?
+          </p>
+          <ul className="list-decimal pl-4 space-y-1.5 text-slate-600 dark:text-slate-300 text-[11px]">
+            <li>Presione el icono de <strong>candado o configuración</strong> en la barra de direcciones del navegador.</li>
+            <li>Seleccione <strong>Permisos del sitio</strong> &gt; <strong>Cámara</strong>.</li>
+            <li>Cambie la opción a <strong>Permitir</strong>.</li>
+            <li>Presione el botón <strong>Reintentar Cámara</strong> a continuación.</li>
           </ul>
         </div>
 
-        <div className="flex flex-col gap-2 pt-2">
+        <div className="flex gap-2 pt-2">
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs shadow-md transition flex items-center justify-center gap-2 active:scale-95"
+            onClick={onCancel}
+            className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-2xl text-xs transition"
           >
-            <Upload className="w-4 h-4" />
-            <span>Seleccionar Foto o Archivo de Factura</span>
+            Regresar
           </button>
-
-          <div className="flex gap-2">
-            <button
-              onClick={onCancel}
-              className="flex-1 py-2.5 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs"
-            >
-              Regresar
-            </button>
-            <button
-              onClick={iniciarCamara}
-              className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-md transition"
-            >
-              Reintentar Cámara
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={iniciarCamara}
+            className="flex-1 py-3 bg-[#07426B] hover:bg-[#052F4D] text-white font-bold rounded-2xl text-xs shadow-md transition flex items-center justify-center gap-2"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Reintentar Cámara</span>
+          </button>
         </div>
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={handleFileSelect}
-        />
       </div>
     );
   }
 
   return (
-    <div className="relative w-full max-w-md mx-auto aspect-[3/4] max-h-[78vh] bg-black rounded-3xl overflow-hidden shadow-2xl flex items-center justify-center select-none">
-      {cargando && (
-        <div className="absolute z-20 flex flex-col items-center gap-2 text-white">
-          <RefreshCw className="w-8 h-8 animate-spin text-emerald-400" />
-          <span className="text-xs font-semibold">Activando cámara posterior...</span>
-        </div>
-      )}
-
-      {mensajeError && (
-        <div className="absolute z-20 p-4 bg-black/80 text-white text-center rounded-2xl m-4 space-y-3">
-          <p className="text-xs text-rose-300">{mensajeError}</p>
-          <button
-            onClick={iniciarCamara}
-            className="px-4 py-2 bg-emerald-600 rounded-xl text-xs font-bold"
-          >
-            Reintentar
-          </button>
-        </div>
-      )}
-
+    <div className="relative w-full max-w-md mx-auto aspect-[3/4] max-h-[78vh] bg-black rounded-3xl overflow-hidden shadow-2xl flex items-center justify-center select-none border-2 border-[#07426B]">
+      {/* Elemento de video */}
       <video
         ref={videoRef}
         autoPlay
         playsInline
         muted
         className="w-full h-full object-cover"
-        onLoadedMetadata={() => setCargando(false)}
       />
 
-      {/* Guía visual con marco DIAN */}
-      <div className="absolute inset-5 border-2 border-dashed border-emerald-400/80 rounded-2xl pointer-events-none flex flex-col justify-between p-3">
-        <div className="flex justify-between items-center">
-          <span className="bg-black/60 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded-md backdrop-blur-sm">
-            EVIDENCIA DIAN
-          </span>
-          <span className="bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-md backdrop-blur-sm font-mono">
-            MÁX 1600PX JPEG
-          </span>
+      {/* Guía visual de encuadre tributario */}
+      <div className="absolute inset-4 border-2 border-dashed border-white/60 rounded-2xl pointer-events-none flex flex-col justify-between p-4">
+        <div className="flex justify-between items-center text-[10px] text-white/90 bg-black/40 backdrop-blur-sm px-2.5 py-1 rounded-full w-fit">
+          <Eye className="w-3 h-3 mr-1 text-[#2CAE4A]" />
+          <span>Encuadre la factura y el código QR / CUFE</span>
         </div>
-
-        <div className="text-center">
-          <span className="bg-black/70 text-white text-[11px] font-medium px-3 py-1 rounded-full backdrop-blur-md shadow-sm">
-            Enfoque el comprobante y el código CUFE
-          </span>
+        <div className="text-center text-[10px] text-white/70 bg-black/40 backdrop-blur-sm py-0.5 rounded-full">
+          Cámara trasera en vivo — Colaves
         </div>
       </div>
 
-      {/* Botón de Cancelar / Volver */}
-      <button
-        onClick={onCancel}
-        className="absolute top-4 left-4 z-30 p-2.5 rounded-full bg-black/60 text-white backdrop-blur-md hover:bg-black/80 transition"
-        title="Cancelar captura"
-      >
-        <ArrowLeft className="w-5 h-5" />
-      </button>
-
-      {/* Botón de Linterna */}
-      {soportaLinterna && (
-        <button
-          onClick={alternarLinterna}
-          className={`absolute top-4 right-4 z-30 p-2.5 rounded-full backdrop-blur-md transition ${
-            linternaActiva ? 'bg-amber-500 text-black' : 'bg-black/60 text-white hover:bg-black/80'
-          }`}
-          title="Alternar linterna"
-        >
-          {linternaActiva ? <Zap className="w-5 h-5" /> : <ZapOff className="w-5 h-5" />}
-        </button>
+      {/* Spinner de carga inicial */}
+      {cargando && (
+        <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center gap-3 text-white">
+          <RefreshCw className="w-8 h-8 animate-spin text-[#2CAE4A]" />
+          <p className="text-xs font-semibold">Iniciando cámara trasera...</p>
+        </div>
       )}
 
-      {/* Disparador táctil y botón de carga de archivo */}
-      <div className="absolute bottom-6 w-full flex justify-between items-center z-30 px-8">
+      {/* Barra de control superior */}
+      <div className="absolute top-4 left-4 right-4 flex justify-between items-center z-10">
         <button
           type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="p-3 bg-black/60 hover:bg-black/80 active:scale-95 text-white rounded-full backdrop-blur-md transition flex items-center justify-center border border-white/20"
-          title="Subir archivo o foto de factura"
+          onClick={onCancel}
+          className="p-2.5 rounded-full bg-black/60 hover:bg-black/80 text-white backdrop-blur-sm transition"
+          aria-label="Cerrar cámara"
         >
-          <Upload className="w-5 h-5 text-emerald-400" />
+          <ArrowLeft className="w-5 h-5" />
         </button>
 
+        {soportaLinterna && (
+          <button
+            type="button"
+            onClick={alternarLinterna}
+            className={`p-2.5 rounded-full backdrop-blur-sm transition ${
+              linternaActiva
+                ? 'bg-[#2CAE4A] text-white shadow-lg shadow-[#2CAE4A]/30'
+                : 'bg-black/60 text-white hover:bg-black/80'
+            }`}
+            aria-label="Alternar linterna"
+          >
+            {linternaActiva ? <Zap className="w-5 h-5" /> : <ZapOff className="w-5 h-5" />}
+          </button>
+        )}
+      </div>
+
+      {/* Botón disparador inferior */}
+      <div className="absolute bottom-6 left-0 right-0 flex justify-center items-center z-10">
         <button
+          type="button"
           onClick={dispararFoto}
-          disabled={cargando || disparando || Boolean(mensajeError)}
-          className="relative w-20 h-20 bg-white rounded-full p-1.5 shadow-2xl active:scale-90 transition-transform disabled:opacity-40"
-          aria-label="Capturar fotografía de factura"
+          disabled={cargando || disparando}
+          className="w-20 h-20 rounded-full border-4 border-white bg-white/20 hover:bg-white/40 active:scale-95 transition flex items-center justify-center p-1.5 shadow-2xl disabled:opacity-40"
+          aria-label="Capturar fotografía"
         >
-          <div className="w-full h-full rounded-full border-4 border-slate-900 bg-white flex items-center justify-center">
+          <div className="w-full h-full rounded-full bg-[#2CAE4A] hover:bg-[#00984C] flex items-center justify-center text-white transition">
             {disparando ? (
-              <RefreshCw className="w-8 h-8 animate-spin text-emerald-600" />
+              <RefreshCw className="w-7 h-7 animate-spin" />
             ) : (
-              <Camera className="w-8 h-8 text-slate-900" />
+              <Camera className="w-8 h-8" />
             )}
           </div>
         </button>
-
-        <div className="w-11" /> {/* Equilibrador de espacio */}
       </div>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={handleFileSelect}
-      />
+      {/* Alerta de error */}
+      {mensajeError && (
+        <div className="absolute bottom-28 left-4 right-4 p-3 bg-rose-600/90 text-white rounded-xl text-xs text-center backdrop-blur-sm z-20">
+          {mensajeError}
+        </div>
+      )}
     </div>
   );
 };

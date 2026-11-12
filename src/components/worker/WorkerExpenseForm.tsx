@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { LiveCamera } from './LiveCamera';
-import { Gasto, UsuarioPerfil, CufeCheckResult } from '../../types';
+import { Gasto, UsuarioPerfil, CufeCheckResult, ExtractionResponse } from '../../types';
 import { validarCUFE, verificarAritmeticaCOP, formatCOP, sanitizeText } from '../../utils/validations';
 import { encolarGastoOffline } from '../../lib/offlineQueue';
+import { getIdToken } from '../../lib/firebaseClient';
 import {
   Camera,
   CheckCircle2,
@@ -24,7 +25,10 @@ import {
   Maximize2,
   QrCode,
   X,
-  Info
+  Lock,
+  ArrowRight,
+  ShieldCheck,
+  AlertCircle
 } from 'lucide-react';
 
 interface Props {
@@ -35,6 +39,8 @@ interface Props {
   onAbrirDrive: () => void;
 }
 
+type EtapaFlujo = 'captura' | 'lectura' | 'verificacion' | 'confirmacion';
+
 export const WorkerExpenseForm: React.FC<Props> = ({
   usuario,
   catalogos,
@@ -42,51 +48,50 @@ export const WorkerExpenseForm: React.FC<Props> = ({
   isOnline,
   onAbrirDrive,
 }) => {
-  const [paso, setPaso] = useState<'inicio' | 'camara' | 'procesando_ia' | 'formulario' | 'exito'>('inicio');
+  // Flujo guiado por etapas: 1. Captura, 2. Lectura, 3. Verificación, 4. Confirmación
+  const [etapa, setEtapa] = useState<EtapaFlujo>('captura');
+  const [mostrandoCamara, setMostrandoCamara] = useState(false);
 
-  // Fotografía
+  // Evidencia Fotográfica Real
   const [fotoUrl, setFotoUrl] = useState('');
   const [fotoBase64, setFotoBase64] = useState('');
   const [fotoTomadaEn, setFotoTomadaEn] = useState('');
+  const [modalFotoZoom, setModalFotoZoom] = useState(false);
 
-  // Campos de la Factura (Autodiligenciados + Editables)
-  const [emisor, setEmisor] = useState('');
-  const [nitEmisor, setNitEmisor] = useState('');
-  const [numeroFactura, setNumeroFactura] = useState('');
-  const [cufe, setCufe] = useState('');
-  const [qrDian, setQrDian] = useState('');
+  // Datos Fiscales Leídos por IA (ESTRICTAMENTE SOLO LECTURA)
+  const [emisor, setEmisor] = useState<string | null>(null);
+  const [nitEmisor, setNitEmisor] = useState<string | null>(null);
+  const [numeroFactura, setNumeroFactura] = useState<string | null>(null);
+  const [cufe, setCufe] = useState<string | null>(null);
+  const [qrDian, setQrDian] = useState<string | null>(null);
+  const [fechaEmision, setFechaEmision] = useState<string | null>(null);
+  const [fechaVencimiento, setFechaVencimiento] = useState<string | null>(null);
+  const [valorNeto, setValorNeto] = useState<number | null>(null);
+  const [iva, setIva] = useState<number | null>(null);
+  const [total, setTotal] = useState<number | null>(null);
+  const [tipoDocumento, setTipoDocumento] = useState<string | null>(null);
+  const [formaPago, setFormaPago] = useState<string | null>(null);
+  const [medioPagoExtraid, setMedioPagoExtraid] = useState<string | null>(null);
+
+  // Diagnóstico y Confianza de IA
   const [confianzaExtraccion, setConfianzaExtraccion] = useState<'alta' | 'media' | 'baja'>('alta');
   const [mensajeDiagnostico, setMensajeDiagnostico] = useState<string | null>(null);
-  const [modalFotoZoom, setModalFotoZoom] = useState(false);
-  const [fechaEmision, setFechaEmision] = useState(new Date().toISOString().split('T')[0]);
-  const [fechaVencimiento, setFechaVencimiento] = useState('');
-  const [valorNeto, setValorNeto] = useState<number>(0);
-  const [iva, setIva] = useState<number>(0);
-  const [total, setTotal] = useState<number>(0);
+  const [iaRawResponse, setIaRawResponse] = useState<string | null>(null);
 
-  // Campos del Trabajador y Justificación
-  const [nombreResponsable, setNombreResponsable] = useState(usuario.nombre_completo);
-  const [cargo, setCargo] = useState(usuario.cargo);
+  // Campos Manuales Únicos Permitidos
   const [tipoGasto, setTipoGasto] = useState('');
   const [tipoPago, setTipoPago] = useState('');
   const [objeto, setObjeto] = useState('');
 
-  // Estados de Validación y Servidor
+  // Validaciones y Servidor
   const [infoDuplicado, setInfoDuplicado] = useState<CufeCheckResult | null>(null);
-  const [validandoCufeServidor, setValidandoCufeServidor] = useState(false);
+  const [validandoCufe, setValidandoCufe] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [errorGlobal, setErrorGlobal] = useState<string | null>(null);
   const [gastoCreado, setGastoCreado] = useState<Gasto | null>(null);
   const [guardadoOffline, setGuardadoOffline] = useState(false);
-  const [autorizarDiferenciaAritmetica, setAutorizarDiferenciaAritmetica] = useState(false);
 
-  // Actualizar nombre y cargo al cambiar usuario
-  useEffect(() => {
-    setNombreResponsable(usuario.nombre_completo);
-    setCargo(usuario.cargo);
-  }, [usuario]);
-
-  // Selección predeterminada de catálogos
+  // Inicializar catálogos
   useEffect(() => {
     if (!tipoGasto && catalogos.tiposGasto.length > 0) {
       setTipoGasto(catalogos.tiposGasto[0]);
@@ -96,7 +101,7 @@ export const WorkerExpenseForm: React.FC<Props> = ({
     }
   }, [catalogos, tipoGasto, tipoPago]);
 
-  // Al recibir la foto de LiveCamera
+  // Al recibir la foto capturada en vivo por LiveCamera
   const handleCapture = async ({
     dataUrl,
     base64,
@@ -106,68 +111,82 @@ export const WorkerExpenseForm: React.FC<Props> = ({
     base64: string;
     capturedAt: string;
   }) => {
+    setMostrandoCamara(false);
     setFotoUrl(dataUrl);
     setFotoBase64(base64);
     setFotoTomadaEn(capturedAt);
-    setPaso('procesando_ia');
+    setEtapa('lectura');
     setErrorGlobal(null);
 
     try {
+      const token = await getIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       // Llamada al endpoint con modelo Gemini de visión en el servidor
       const response = await fetch('/api/extract-invoice', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ imageBase64: base64 }),
       });
 
       if (!response.ok) {
-        throw new Error('El servicio de análisis fiscal no respondió correctamente');
+        throw new Error('El servicio de análisis tributario no respondió correctamente.');
       }
 
-      const data = await response.json();
+      const data: ExtractionResponse = await response.json();
 
-      // Precarga de valores leídos (dato no visible = null / vacío)
-      if (data.emisor) setEmisor(data.emisor);
-      if (data.nit_emisor) setNitEmisor(data.nit_emisor);
-      if (data.numero_factura) setNumeroFactura(data.numero_factura);
-      if (data.cufe) {
-        setCufe(data.cufe);
-        verificarCufeEnServidor(data.cufe);
+      // Guardar datos leídos (dato no visible = null / No identificado)
+      setEmisor(data.emisor || null);
+      setNitEmisor(data.nit_emisor || null);
+      setNumeroFactura(data.numero_factura || null);
+      setCufe(data.cufe || null);
+      setQrDian(data.qr_dian || null);
+      setFechaEmision(data.fecha_emision || null);
+      setFechaVencimiento(data.fecha_vencimiento || null);
+      setValorNeto(data.valor_neto !== undefined && data.valor_neto !== null ? Number(data.valor_neto) : null);
+      setIva(data.iva !== undefined && data.iva !== null ? Number(data.iva) : null);
+      setTotal(data.total !== undefined && data.total !== null ? Number(data.total) : null);
+      setTipoDocumento(data.tipo_documento || null);
+      setFormaPago(data.forma_pago || null);
+      setMedioPagoExtraid(data.medio_pago || null);
+      setConfianzaExtraccion(data.confianza_extraccion || 'alta');
+      setMensajeDiagnostico(data.mensaje_diagnostico || null);
+      setIaRawResponse(data.ia_raw_response || null);
+
+      if (data.concepto_sugerido && !objeto) {
+        setObjeto(data.concepto_sugerido);
       }
-      if (data.qr_dian) setQrDian(data.qr_dian);
-      if (data.confianza_extraccion) setConfianzaExtraccion(data.confianza_extraccion);
-      if (data.mensaje_diagnostico) setMensajeDiagnostico(data.mensaje_diagnostico);
-      if (data.concepto_sugerido && !objeto) setObjeto(data.concepto_sugerido);
-      if (data.fecha_emision) setFechaEmision(data.fecha_emision);
-      if (data.fecha_vencimiento) setFechaVencimiento(data.fecha_vencimiento);
-      if (data.valor_neto !== undefined && data.valor_neto !== null) {
-        setValorNeto(Number(data.valor_neto));
-      }
-      if (data.iva !== undefined && data.iva !== null) {
-        setIva(Number(data.iva));
-      }
-      if (data.total !== undefined && data.total !== null) {
-        setTotal(Number(data.total));
+
+      // Si se leyó un CUFE de 96 hex, verificar duplicado inmediatamente en el servidor
+      if (data.cufe && data.cufe.length === 96) {
+        verificarCufeEnServidor(data.cufe, token);
       }
     } catch (err: any) {
       console.warn('Aviso en extracción con IA:', err.message);
-      setMensajeDiagnostico('No se pudo procesar la imagen automáticamente. Complete los campos manualmente.');
+      setMensajeDiagnostico('No fue posible extraer automáticamente los datos. Por favor repita la fotografía con mejor luz.');
     } finally {
-      setPaso('formulario');
+      setEtapa('verificacion');
     }
   };
 
-  // Verificación en tiempo real si el CUFE ya existe
-  const verificarCufeEnServidor = async (cufeToCheck: string) => {
+  // Verificación de CUFE duplicado en el servidor
+  const verificarCufeEnServidor = async (cufeToCheck: string, tokenParam?: string | null) => {
     const limpio = cufeToCheck.trim().toLowerCase();
-    if (limpio.length !== 96 || !/^[a-f0-9]{96}$/.test(limpio)) {
+    if (limpio.length !== 96) {
       setInfoDuplicado(null);
       return;
     }
 
-    setValidandoCufeServidor(true);
+    setValidandoCufe(true);
     try {
-      const resp = await fetch(`/api/check-cufe/${limpio}`);
+      const token = tokenParam || (await getIdToken());
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const resp = await fetch(`/api/check-cufe/${limpio}`, { headers });
       if (resp.ok) {
         const data = await resp.json();
         if (data.duplicado) {
@@ -177,80 +196,87 @@ export const WorkerExpenseForm: React.FC<Props> = ({
         }
       }
     } catch (err) {
-      console.warn('No se pudo verificar CUFE en servidor (posiblemente offline):', err);
+      console.warn('Aviso consultando duplicado de CUFE:', err);
     } finally {
-      setValidandoCufeServidor(false);
+      setValidandoCufe(false);
     }
   };
 
-  const handleCufeChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    // Sanitizar permitiendo únicamente caracteres hexadecimales
-    const sanitized = e.target.value.replace(/[^a-fA-F0-9]/g, '').toLowerCase();
-    setCufe(sanitized);
-    if (sanitized.length === 96) {
-      verificarCufeEnServidor(sanitized);
-    } else {
-      setInfoDuplicado(null);
-    }
-  };
+  // Comprobación aritmética estricta
+  const checkAritmetica = verificarAritmeticaCOP(valorNeto || 0, iva || 0, total || 0);
 
+  // Radicar gasto formalmente
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorGlobal(null);
 
-    // 1. Validación de fotografía mandatoria
+    // 1. Fotografía obligatoria
     if (!fotoUrl) {
-      setErrorGlobal('La fotografía en vivo de la factura es un requisito fiscal obligatorio.');
+      setErrorGlobal('La captura fotográfica de la factura con cámara trasera es obligatoria.');
       return;
     }
 
     // 2. Validación de CUFE de 96 caracteres hexadecimales
-    if (!validarCUFE(cufe)) {
-      setErrorGlobal('El Código CUFE debe contener exactamente 96 caracteres hexadecimales válidos.');
+    if (!cufe || !validarCUFE(cufe)) {
+      setErrorGlobal(
+        'El Código CUFE no pudo ser validado con los 96 caracteres hexadecimales requeridos por la DIAN. Presione "Repetir Fotografía" para capturarlo nuevamente.'
+      );
       return;
     }
 
     // 3. Validación de duplicado
     if (infoDuplicado?.duplicado) {
-      setErrorGlobal('Esta factura (CUFE) ya se encuentra radicada en el sistema contable.');
+      setErrorGlobal('Esta factura (CUFE) ya se encuentra radicada en el sistema contable de Colaves.');
       return;
     }
 
     // 4. Verificación aritmética de Neto + IVA = Total
-    const checkAritmetica = verificarAritmeticaCOP(valorNeto, iva, total);
-    if (!checkAritmetica.cuadra && !autorizarDiferenciaAritmetica) {
+    // En Colaves, si la aritmética no cuadra, no se permite autorizar: debe repetirse la foto
+    if (!checkAritmetica.cuadra) {
       setErrorGlobal(
-        `Alerta aritmética: Neto ($ ${formatCOP(valorNeto)}) + IVA ($ ${formatCOP(iva)}) = $ ${formatCOP(checkAritmetica.sumaEsperada)}, existiendo una diferencia de $ ${formatCOP(checkAritmetica.diferencia)} frente al Total ($ ${formatCOP(total)}). Active la autorización de diferencia contable abajo para radicar.`
+        `Descuadre contable detectado: Neto ($ ${formatCOP(valorNeto || 0)}) + IVA ($ ${formatCOP(iva || 0)}) = $ ${formatCOP(checkAritmetica.sumaEsperada)}, existiendo una diferencia de $ ${formatCOP(checkAritmetica.diferencia)} frente al Total ($ ${formatCOP(total || 0)}). Debe repetir la foto para corregir la lectura.`
       );
+      return;
+    }
+
+    // 5. Justificación obligatoria
+    if (!objeto.trim()) {
+      setErrorGlobal('Debe ingresar el objeto o justificación operativa del gasto.');
       return;
     }
 
     setGuardando(true);
 
+    const expenseId = crypto.randomUUID();
     const payloadGasto: Gasto = {
-      id: crypto.randomUUID(),
+      id: expenseId,
       creado_en: new Date().toISOString(),
       user_id: usuario.id,
-      emisor: sanitizeText(emisor),
-      nit_emisor: sanitizeText(nitEmisor) || null,
-      numero_factura: sanitizeText(numeroFactura),
+      emisor: sanitizeText(emisor || 'No identificado'),
+      nit_emisor: nitEmisor ? sanitizeText(nitEmisor) : null,
+      numero_factura: sanitizeText(numeroFactura || 'No identificado'),
       cufe: cufe.trim().toLowerCase(),
       qr_dian: qrDian || null,
-      confianza_extraccion: confianzaExtraccion,
-      fecha_emision: fechaEmision,
+      fecha_emision: fechaEmision || new Date().toISOString().split('T')[0],
       fecha_vencimiento: fechaVencimiento || null,
       valor_neto: Number(valorNeto) || 0,
       iva: Number(iva) || 0,
       total: Number(total) || 0,
-      nombre_responsable: sanitizeText(nombreResponsable),
-      cargo: sanitizeText(cargo),
+      tipo_documento: tipoDocumento || 'Factura Electrónica de Venta',
+      forma_pago: formaPago || 'Contado',
+      medio_pago: medioPagoExtraid || 'Bancarizado',
+      nombre_responsable: usuario.nombre_completo,
+      cargo: usuario.cargo,
       tipo_gasto: tipoGasto || 'Alimentación / Viáticos',
       tipo_pago: tipoPago || 'Efectivo / Caja menor',
       objeto: sanitizeText(objeto),
-      foto_path: `factura_${Date.now()}_${cufe.substring(0, 8)}.jpg`,
-      foto_url: fotoUrl,
+      foto_path: `factura_${expenseId}.jpg`,
+      foto_url: fotoUrl, // Se envía para almacenamiento protegido en el backend
       foto_tomada_en: fotoTomadaEn || new Date().toISOString(),
       estado: 'pendiente',
+      confianza_extraccion: confianzaExtraccion,
+      mensaje_diagnostico: mensajeDiagnostico || 'Radicado por trabajador',
+      ia_raw_response: iaRawResponse,
     };
 
     try {
@@ -260,13 +286,17 @@ export const WorkerExpenseForm: React.FC<Props> = ({
         setGuardadoOffline(true);
         setGastoCreado(payloadGasto);
         onGastoGuardado(payloadGasto);
-        setPaso('exito');
+        setEtapa('confirmacion');
         return;
       }
 
+      const token = await getIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
       const resp = await fetch('/api/expenses', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payloadGasto),
       });
 
@@ -274,16 +304,16 @@ export const WorkerExpenseForm: React.FC<Props> = ({
         const errorData = await resp.json().catch(() => ({}));
         if (resp.status === 409 && errorData.duplicado) {
           setInfoDuplicado(errorData);
-          throw new Error(errorData.error || 'Factura duplicada en el sistema');
+          throw new Error(errorData.error || 'Factura ya radicada anteriormente.');
         }
-        throw new Error(errorData.error || 'Error al guardar el gasto en el servidor');
+        throw new Error(errorData.error || 'Error al radicar el comprobante en el servidor.');
       }
 
       const guardado = await resp.json();
       setGuardadoOffline(false);
       setGastoCreado(guardado);
       onGastoGuardado(guardado);
-      setPaso('exito');
+      setEtapa('confirmacion');
     } catch (err: any) {
       console.error('Error al radicar gasto:', err);
       if (!navigator.onLine || err.message?.includes('Failed to fetch')) {
@@ -291,638 +321,622 @@ export const WorkerExpenseForm: React.FC<Props> = ({
         setGuardadoOffline(true);
         setGastoCreado(payloadGasto);
         onGastoGuardado(payloadGasto);
-        setPaso('exito');
+        setEtapa('confirmacion');
       } else {
-        setErrorGlobal(err.message || 'Error inesperado al radicar');
+        setErrorGlobal(err.message || 'Error inesperado al guardar');
       }
     } finally {
       setGuardando(false);
     }
   };
 
-  const reiniciarFormulario = () => {
-    setPaso('inicio');
+  const reiniciarFlujo = () => {
+    setEtapa('captura');
+    setMostrandoCamara(false);
     setFotoUrl('');
     setFotoBase64('');
     setFotoTomadaEn('');
-    setEmisor('');
-    setNitEmisor('');
-    setNumeroFactura('');
-    setCufe('');
-    setQrDian('');
-    setConfianzaExtraccion('alta');
-    setMensajeDiagnostico(null);
-    setModalFotoZoom(false);
-    setValorNeto(0);
-    setIva(0);
-    setTotal(0);
+    setEmisor(null);
+    setNitEmisor(null);
+    setNumeroFactura(null);
+    setCufe(null);
+    setQrDian(null);
+    setFechaEmision(null);
+    setFechaVencimiento(null);
+    setValorNeto(null);
+    setIva(null);
+    setTotal(null);
+    setTipoDocumento(null);
+    setFormaPago(null);
+    setMedioPagoExtraid(null);
     setObjeto('');
     setInfoDuplicado(null);
     setErrorGlobal(null);
     setGastoCreado(null);
   };
 
-  const estadoAritmetica = verificarAritmeticaCOP(valorNeto, iva, total);
-
-  // VISTA 1: CÁMARA EN VIVO
-  if (paso === 'camara') {
+  // VISTA 1: CÁMARA TRASERA EN VIVO
+  if (mostrandoCamara) {
     return (
-      <LiveCamera
-        onCapture={handleCapture}
-        onCancel={() => setPaso('inicio')}
-      />
-    );
-  }
-
-  // VISTA 2: PROCESAMIENTO CON IA DE VISIÓN
-  if (paso === 'procesando_ia') {
-    return (
-      <div className="max-w-md mx-auto py-16 px-4 text-center space-y-5">
-        <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
-          <div className="absolute inset-0 rounded-full border-4 border-emerald-500/20 animate-ping" />
-          <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-emerald-600 to-blue-600 flex items-center justify-center text-white shadow-xl shadow-emerald-500/20">
-            <Sparkles className="w-10 h-10 animate-spin" />
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <h2 className="text-xl font-black text-slate-900 dark:text-white">
-            Analizando Factura Electrónica...
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs mx-auto leading-relaxed">
-            El modelo de visión artificial está localizando el CUFE de 96 caracteres, el emisor y desglosando los impuestos de la DIAN.
-          </p>
-        </div>
-
-        {fotoUrl && (
-          <div className="w-48 h-32 mx-auto rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-md">
-            <img src={fotoUrl} alt="Vista previa" className="w-full h-full object-cover" />
-          </div>
-        )}
+      <div className="py-2">
+        <LiveCamera
+          onCapture={handleCapture}
+          onCancel={() => setMostrandoCamara(false)}
+        />
       </div>
     );
   }
 
-  // VISTA 3: CONFIRMACIÓN EXITOSA
-  if (paso === 'exito') {
+  // Barra indicadora de progreso (4 etapas guiadas)
+  const renderIndicadorProgreso = () => {
+    const etapas: { id: EtapaFlujo; label: string; num: number }[] = [
+      { id: 'captura', label: 'Captura', num: 1 },
+      { id: 'lectura', label: 'Lectura', num: 2 },
+      { id: 'verificacion', label: 'Verificación', num: 3 },
+      { id: 'confirmacion', label: 'Confirmación', num: 4 },
+    ];
+
+    const currentIdx = etapas.findIndex((e) => e.id === etapa);
+
     return (
-      <div className="max-w-md mx-auto py-12 px-4 text-center space-y-6">
-        <div className="w-20 h-20 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 mx-auto flex items-center justify-center border-4 border-emerald-200 dark:border-emerald-800 shadow-xl">
-          <CheckCircle2 className="w-12 h-12" />
-        </div>
+      <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm mb-5">
+        <div className="flex justify-between items-center relative">
+          <div className="absolute left-6 right-6 top-1/2 -translate-y-1/2 h-1 bg-slate-100 dark:bg-slate-800 z-0" />
+          <div
+            className="absolute left-6 top-1/2 -translate-y-1/2 h-1 bg-[#2CAE4A] transition-all duration-500 z-0"
+            style={{ width: `${(currentIdx / (etapas.length - 1)) * 100}%` }}
+          />
 
-        <div className="space-y-2">
-          <h2 className="text-2xl font-black text-slate-900 dark:text-white">
-            ¡Gasto Radicado con Éxito!
-          </h2>
-          {guardadoOffline ? (
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 rounded-full text-xs font-semibold">
-              <WifiOff className="w-3.5 h-3.5" />
-              Guardado en cola fuera de línea (se sincronizará al reconectar)
-            </div>
-          ) : (
-            <p className="text-xs text-slate-600 dark:text-slate-400">
-              El comprobante y su código CUFE han quedado registrados para auditoría. Te notificaremos mediante alertas web cuando sea revisado.
-            </p>
-          )}
-        </div>
+          {etapas.map((step, idx) => {
+            const isCompleted = idx < currentIdx;
+            const isCurrent = idx === currentIdx;
 
-        {gastoCreado && (
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 border border-slate-200 dark:border-slate-700 text-left text-xs space-y-2.5 shadow-sm">
-            <div className="flex justify-between border-b pb-2 dark:border-slate-700">
-              <span className="text-slate-400">Total Legalizado:</span>
-              <span className="font-black text-emerald-600 dark:text-emerald-400 text-sm">
-                {formatCOP(gastoCreado.total)}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-400">Emisor:</span>
-              <span className="font-semibold text-slate-700 dark:text-slate-300">
-                {gastoCreado.emisor}
-              </span>
-            </div>
-            {gastoCreado.nit_emisor && (
-              <div className="flex justify-between">
-                <span className="text-slate-400">NIT Emisor:</span>
-                <span className="font-mono text-slate-700 dark:text-slate-300">
-                  {gastoCreado.nit_emisor}
-                </span>
-              </div>
-            )}
-            <div className="flex justify-between">
-              <span className="text-slate-400">N° Factura:</span>
-              <span className="font-mono text-slate-700 dark:text-slate-300">
-                {gastoCreado.numero_factura}
-              </span>
-            </div>
-            <div className="flex flex-col gap-1 pt-1">
-              <span className="text-slate-400 text-[10px]">CUFE Verificado:</span>
-              <span className="font-mono text-[9px] text-slate-500 dark:text-slate-400 break-all bg-slate-50 dark:bg-slate-900 p-1.5 rounded">
-                {gastoCreado.cufe}
-              </span>
-            </div>
-            {gastoCreado.qr_dian && (
-              <div className="flex flex-col gap-0.5 pt-1">
-                <span className="text-slate-400 text-[10px]">Parámetros QR DIAN:</span>
-                <span className="font-mono text-[8.5px] text-slate-500 dark:text-slate-400 break-all bg-slate-50 dark:bg-slate-900 p-1.5 rounded">
-                  {gastoCreado.qr_dian}
-                </span>
-              </div>
-            )}
-            {gastoCreado.foto_url && (
-              <div className="pt-2 border-t dark:border-slate-700">
-                <span className="text-slate-400 text-[10px] block mb-1">Foto Adjunta al Expediente:</span>
+            return (
+              <div key={step.id} className="relative z-10 flex flex-col items-center">
                 <div
-                  onClick={() => setModalFotoZoom(true)}
-                  className="relative aspect-[16/9] rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 cursor-pointer group"
+                  className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs transition-all ${
+                    isCompleted
+                      ? 'bg-[#2CAE4A] text-white shadow-md'
+                      : isCurrent
+                      ? 'bg-[#07426B] text-white ring-4 ring-blue-100 dark:ring-blue-950/60 shadow-lg'
+                      : 'bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 text-slate-400'
+                  }`}
                 >
-                  <img src={gastoCreado.foto_url} alt="Factura adjunta" className="w-full h-full object-cover group-hover:scale-105 transition" />
-                  <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[11px] font-bold gap-1">
-                    <Maximize2 className="w-4 h-4" />
-                    <span>Ver Foto Completa</span>
-                  </div>
+                  {isCompleted ? <CheckCircle2 className="w-4 h-4" /> : step.num}
                 </div>
+                <span
+                  className={`text-[10px] mt-1.5 font-bold ${
+                    isCurrent
+                      ? 'text-[#07426B] dark:text-blue-400'
+                      : isCompleted
+                      ? 'text-[#2CAE4A]'
+                      : 'text-slate-400'
+                  }`}
+                >
+                  {step.label}
+                </span>
               </div>
-            )}
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  // ETAPA 2: LECTURA CON IA DE VISIÓN
+  if (etapa === 'lectura') {
+    return (
+      <div className="max-w-md mx-auto space-y-5">
+        {renderIndicadorProgreso()}
+
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 border border-slate-200 dark:border-slate-800 shadow-xl text-center space-y-6">
+          <div className="relative w-24 h-24 mx-auto flex items-center justify-center">
+            <div className="absolute inset-0 rounded-full border-4 border-[#2CAE4A]/20 animate-ping" />
+            <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-[#07426B] to-[#2CAE4A] flex items-center justify-center text-white shadow-xl">
+              <Sparkles className="w-10 h-10 animate-spin" />
+            </div>
           </div>
-        )}
 
-        <div className="space-y-2 pt-1">
-          <button
-            onClick={onAbrirDrive}
-            className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-2xl shadow-md active:scale-95 transition text-xs flex items-center justify-center gap-2"
-          >
-            <Cloud className="w-4 h-4" />
-            <span>Respaldar Comprobante en Google Drive</span>
-          </button>
+          <div className="space-y-2">
+            <h2 className="text-xl font-black text-slate-900 dark:text-white">
+              Analizando Factura DIAN...
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs mx-auto leading-relaxed">
+              El motor de visión artificial está localizando el CUFE de 96 caracteres, identificando al emisor y verificando los impuestos tributarios.
+            </p>
+          </div>
 
-          <button
-            onClick={reiniciarFormulario}
-            className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl shadow-lg active:scale-95 transition text-sm flex items-center justify-center gap-2"
-          >
-            <Camera className="w-5 h-5" />
-            <span>Legalizar Otro Gasto</span>
-          </button>
+          {fotoUrl && (
+            <div className="w-48 h-32 mx-auto rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-md">
+              <img src={fotoUrl} alt="Vista previa" className="w-full h-full object-cover" />
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
-  // VISTA 4: FORMULARIO PRINCIPAL O BIENVENIDA
-  return (
-    <div className="max-w-md mx-auto space-y-5 pb-16">
-      {/* Tarjeta de Inicio / Tomar Foto */}
-      {paso === 'inicio' ? (
-        <div className="bg-gradient-to-br from-slate-900 to-blue-950 text-white rounded-3xl p-6 shadow-xl space-y-5 relative overflow-hidden">
-          <div className="space-y-1 relative z-10">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-800">
-              Módulo de Campo
-            </span>
-            <h2 className="text-xl font-black text-white">
-              Legalización de Gastos DIAN
+  // ETAPA 4: CONFIRMACIÓN EXITOSA
+  if (etapa === 'confirmacion') {
+    return (
+      <div className="max-w-md mx-auto space-y-5">
+        {renderIndicadorProgreso()}
+
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-xl text-center space-y-5">
+          <div className="w-20 h-20 rounded-3xl bg-emerald-50 dark:bg-emerald-950/60 text-[#2CAE4A] mx-auto flex items-center justify-center border-2 border-emerald-200 dark:border-emerald-800 shadow-lg">
+            <CheckCircle2 className="w-12 h-12" />
+          </div>
+
+          <div className="space-y-1.5">
+            <h2 className="text-2xl font-black text-slate-900 dark:text-white">
+              ¡Factura Radicada con Éxito!
             </h2>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Hola, <strong>{usuario.nombre_completo}</strong> ({usuario.cargo}). Fotografía tu factura física o electrónica para extraer automáticamente el CUFE y los valores contables.
-            </p>
-          </div>
-
-          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10 space-y-3 relative z-10">
-            <div className="flex items-center gap-2 text-xs text-emerald-300">
-              <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-              <span>Validación estricta de CUFE (96 caracteres hexadecimales)</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-emerald-300">
-              <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-              <span>Detección automática de duplicados</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-emerald-300">
-              <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-              <span>Soporte sin conexión con sincronización automática</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-emerald-300">
-              <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-              <span>Notificaciones web instantáneas de aprobación o rechazo</span>
-            </div>
-          </div>
-
-          <button
-            onClick={() => setPaso('camara')}
-            className="w-full py-4 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-black rounded-2xl shadow-xl shadow-emerald-500/25 active:scale-95 transition flex items-center justify-center gap-3 text-base"
-          >
-            <Camera className="w-6 h-6" />
-            Tomar Foto de la Factura
-          </button>
-        </div>
-      ) : (
-        /* Formulario con Datos */
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Header con foto capturada */}
-          <div className="bg-white dark:bg-slate-800 rounded-3xl p-4 border border-slate-200 dark:border-slate-700 shadow-sm space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                <h3 className="font-bold text-sm">Evidencia Fotográfica de la Factura</h3>
+            {guardadoOffline ? (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 rounded-full text-xs font-semibold border border-amber-200">
+                <WifiOff className="w-3.5 h-3.5" />
+                <span>Guardado fuera de línea (se sincronizará automáticamente)</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                {fotoUrl && (
-                  <button
-                    type="button"
-                    onClick={() => setModalFotoZoom(true)}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-600 transition"
-                  >
-                    <Maximize2 className="w-3.5 h-3.5" />
-                    <span>Ampliar</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setPaso('camara')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-700 text-blue-600 dark:text-blue-400 text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-600 transition"
-                >
-                  <Camera className="w-3.5 h-3.5" />
-                  Repetir Foto
-                </button>
-              </div>
-            </div>
-
-            {fotoUrl && (
-              <div
-                onClick={() => setModalFotoZoom(true)}
-                className="relative aspect-[16/9] rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 cursor-pointer group"
-              >
-                <img src={fotoUrl} alt="Factura capturada" className="w-full h-full object-cover group-hover:scale-[1.02] transition" />
-                <span className="absolute bottom-2 left-2 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-full backdrop-blur-sm">
-                  Foto vinculada a la base de datos
-                </span>
-                <span className="absolute top-2 right-2 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-full backdrop-blur-sm flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
-                  <Maximize2 className="w-3 h-3" /> Clic para zoom
-                </span>
-              </div>
+            ) : (
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                El comprobante y su código CUFE han quedado registrados en Colaves para auditoría contable.
+              </p>
             )}
           </div>
 
-          {/* Banner de diagnóstico de la lectura real con IA */}
-          {mensajeDiagnostico && (
-            <div
-              className={`p-3.5 rounded-2xl border text-xs flex items-start gap-2.5 ${
-                confianzaExtraccion === 'alta'
-                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
-                  : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200'
-              }`}
-            >
-              <Sparkles className="w-4 h-4 flex-shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
-              <div className="space-y-0.5">
-                <div className="flex items-center gap-2 font-bold">
-                  <span>Lectura de Factura ({confianzaExtraccion === 'alta' ? 'Confianza Alta' : 'Revisión Sugerida'})</span>
-                </div>
-                <p className="text-[11px] opacity-90">{mensajeDiagnostico}</p>
+          {gastoCreado && (
+            <div className="bg-slate-50 dark:bg-slate-800/60 rounded-2xl p-4 border border-slate-200 dark:border-slate-700 text-left text-xs space-y-2.5">
+              <div className="flex justify-between border-b pb-2 dark:border-slate-700">
+                <span className="text-slate-400">Total Legalizado:</span>
+                <span className="font-black text-[#2CAE4A] text-sm">
+                  {formatCOP(gastoCreado.total)}
+                </span>
               </div>
-            </div>
-          )}
-
-          {/* Banner de alerta de duplicado */}
-          {infoDuplicado?.duplicado && (
-            <div className="p-4 bg-rose-50 dark:bg-rose-950/60 border-2 border-rose-400 text-rose-800 dark:text-rose-200 rounded-2xl space-y-1.5 text-xs animate-shake">
-              <div className="flex items-center gap-2 font-black text-rose-900 dark:text-rose-100 text-sm">
-                <AlertTriangle className="w-5 h-5 text-rose-600" />
-                <span>¡FACTURA DUPLICADA DETECTADA!</span>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Emisor:</span>
+                <span className="font-semibold text-slate-700 dark:text-slate-300">
+                  {gastoCreado.emisor}
+                </span>
               </div>
-              <p>
-                Este CUFE ya fue legalizado anteriormente en el sistema contable por:{' '}
-                <strong>{infoDuplicado.registrado_por}</strong> ({infoDuplicado.cargo || 'Funcionario'}) el{' '}
-                <strong>
-                  {infoDuplicado.fecha_registro
-                    ? new Date(infoDuplicado.fecha_registro).toLocaleDateString('es-CO')
-                    : 'fecha previa'}
-                </strong>.
-              </p>
-              <p className="text-[11px] font-semibold text-rose-700 dark:text-rose-300">
-                Por política de control interno DIAN, esta radicación está bloqueada.
-              </p>
-            </div>
-          )}
-
-          {/* Banner de Error Global */}
-          {errorGlobal && (
-            <div className="p-3 bg-rose-50 dark:bg-rose-900/40 border border-rose-300 text-rose-700 dark:text-rose-200 text-xs rounded-xl">
-              {errorGlobal}
-            </div>
-          )}
-
-          {/* SECCIÓN 1: DATOS FISCALES EXTRAÍDOS */}
-          <div className="bg-white dark:bg-slate-800 rounded-3xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
-            <div className="flex items-center gap-2 border-b pb-2 dark:border-slate-700">
-              <Building2 className="w-4 h-4 text-emerald-600" />
-              <h4 className="text-xs font-black uppercase tracking-wider text-slate-500">
-                1. Datos Fiscales de la Factura
-              </h4>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Emisor / Razón Social del Proveedor *
-                </label>
-                <input
-                  required
-                  type="text"
-                  placeholder="Ej: Organización Terpel S.A."
-                  value={emisor}
-                  onChange={(e) => setEmisor(e.target.value)}
-                  className="w-full text-sm p-3 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  NIT del Emisor (DIAN)
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ej: 860.005.224-6"
-                  value={nitEmisor}
-                  onChange={(e) => setNitEmisor(e.target.value)}
-                  className="w-full text-sm p-3 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 font-mono"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  N° Factura / Consecutivo *
-                </label>
-                <div className="relative">
-                  <Hash className="w-4 h-4 absolute left-3 top-3.5 text-slate-400" />
-                  <input
-                    required
-                    type="text"
-                    placeholder="FE-1234"
-                    value={numeroFactura}
-                    onChange={(e) => setNumeroFactura(e.target.value)}
-                    className="w-full text-sm p-3 pl-9 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 font-mono"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Fecha de Emisión *
-                </label>
-                <div className="relative">
-                  <Calendar className="w-4 h-4 absolute left-3 top-3.5 text-slate-400" />
-                  <input
-                    required
-                    type="date"
-                    value={fechaEmision}
-                    onChange={(e) => setFechaEmision(e.target.value)}
-                    className="w-full text-sm p-3 pl-9 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Campo CUFE 96 hex con contador interactivo */}
-            <div>
-              <div className="flex justify-between items-center mb-1">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                  <KeyRound className="w-3.5 h-3.5 text-emerald-600" />
-                  Código CUFE (96 hex) *
-                </label>
-                <div className="flex items-center gap-1 text-[11px] font-mono">
-                  {validandoCufeServidor && <Loader2 className="w-3 h-3 animate-spin text-blue-500" />}
-                  <span
-                    className={`font-bold px-2 py-0.5 rounded-full text-[10px] ${
-                      cufe.length === 96
-                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                        : 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
-                    }`}
-                  >
-                    {cufe.length}/96 hex
+              {gastoCreado.nit_emisor && (
+                <div className="flex justify-between">
+                  <span className="text-slate-400">NIT:</span>
+                  <span className="font-mono text-slate-700 dark:text-slate-300">
+                    {gastoCreado.nit_emisor}
                   </span>
                 </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-slate-400">N° Factura:</span>
+                <span className="font-mono text-slate-700 dark:text-slate-300">
+                  {gastoCreado.numero_factura}
+                </span>
               </div>
+              <div className="flex flex-col gap-1 pt-1">
+                <span className="text-slate-400 text-[10px]">CUFE Verificado:</span>
+                <span className="font-mono text-[9px] text-slate-600 dark:text-slate-300 break-all bg-white dark:bg-slate-900 p-2 rounded-xl border border-slate-200 dark:border-slate-700">
+                  {gastoCreado.cufe}
+                </span>
+              </div>
+            </div>
+          )}
 
-              <textarea
-                required
-                rows={2}
-                value={cufe}
-                onChange={handleCufeChange}
-                placeholder="Pegue o verifique los 96 caracteres hexadecimales del CUFE"
-                className="w-full font-mono text-xs p-3 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 break-all leading-tight"
-              />
-              <p className="text-[10px] text-slate-400 mt-0.5">
-                Solo dígitos (0-9) y letras de la A a la F. El sistema bloquea duplicados.
-              </p>
+          <div className="space-y-2 pt-2">
+            <button
+              onClick={onAbrirDrive}
+              className="w-full py-3 bg-[#07426B] hover:bg-[#052F4D] text-white font-bold rounded-2xl shadow-md active:scale-95 transition text-xs flex items-center justify-center gap-2"
+            >
+              <Cloud className="w-4 h-4" />
+              <span>Respaldar en Google Drive</span>
+            </button>
+
+            <button
+              onClick={reiniciarFlujo}
+              className="w-full py-3.5 bg-[#2CAE4A] hover:bg-[#00984C] text-white font-black rounded-2xl shadow-lg active:scale-95 transition text-xs flex items-center justify-center gap-2"
+            >
+              <Camera className="w-4 h-4" />
+              <span>Registrar Otra Factura</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ETAPA 1: INICIO / ACTIVACIÓN DE CÁMARA
+  if (etapa === 'captura') {
+    return (
+      <div className="max-w-md mx-auto space-y-5">
+        {renderIndicadorProgreso()}
+
+        <div className="bg-gradient-to-br from-[#07426B] to-[#052F4D] text-white rounded-3xl p-6 shadow-xl space-y-5 relative overflow-hidden">
+          <div className="space-y-1 relative z-10">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#2CAE4A] bg-emerald-950/60 px-2.5 py-0.5 rounded-full border border-emerald-800/80">
+              Módulo de Campo Colaves
+            </span>
+            <h2 className="text-xl font-black text-white">
+              Legalización de Facturas DIAN
+            </h2>
+            <p className="text-xs text-slate-200 leading-relaxed">
+              Hola, <strong>{usuario.nombre_completo}</strong> ({usuario.cargo}). Fotografía la factura física en vivo con la cámara trasera para extraer automáticamente los códigos de facturación.
+            </p>
+          </div>
+
+          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/10 space-y-2.5 text-xs text-emerald-200">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-[#2CAE4A] flex-shrink-0" />
+              <span>Captura en vivo obligatoria con cámara trasera (sin galería)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-[#2CAE4A] flex-shrink-0" />
+              <span>Validación estricta de CUFE (96 caracteres hexadecimales)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-[#2CAE4A] flex-shrink-0" />
+              <span>Campos leídos protegidos en modo solo lectura</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-[#2CAE4A] flex-shrink-0" />
+              <span>Trazabilidad y almacenamiento persistente en la nube</span>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setMostrandoCamara(true)}
+            className="w-full py-4 bg-[#2CAE4A] hover:bg-[#00984C] text-white font-black rounded-2xl shadow-xl shadow-[#2CAE4A]/30 active:scale-95 transition flex items-center justify-center gap-3 text-sm"
+          >
+            <Camera className="w-5 h-5" />
+            <span>Activar Cámara Trasera</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ETAPA 3: VERIFICACIÓN DE DATOS (CAMPOS LEÍDOS ESTRICTAMENTE SOLO LECTURA)
+  return (
+    <div className="max-w-md mx-auto space-y-5 pb-16">
+      {renderIndicadorProgreso()}
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Tarjeta de Evidencia Fotográfica */}
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#2CAE4A]" />
+              <h3 className="font-bold text-xs uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Evidencia Fotográfica Capturada
+              </h3>
+            </div>
+            <div className="flex items-center gap-1.5">
+              {fotoUrl && (
+                <button
+                  type="button"
+                  onClick={() => setModalFotoZoom(true)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-200 transition"
+                >
+                  <Maximize2 className="w-3.5 h-3.5" />
+                  <span>Ampliar</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setMostrandoCamara(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-[#07426B] dark:text-blue-400 text-xs font-bold hover:bg-slate-200 transition"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Repetir Fotografía</span>
+              </button>
+            </div>
+          </div>
+
+          {fotoUrl && (
+            <div
+              onClick={() => setModalFotoZoom(true)}
+              className="relative aspect-[16/9] rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 cursor-pointer group"
+            >
+              <img src={fotoUrl} alt="Factura capturada" className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
+              <span className="absolute bottom-2 left-2 bg-black/70 text-white text-[10px] px-2.5 py-0.5 rounded-full backdrop-blur-sm">
+                Foto vinculada al registro contable
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Diagnóstico de Lectura IA */}
+        {mensajeDiagnostico && (
+          <div
+            className={`p-3.5 rounded-2xl border text-xs flex items-start gap-2.5 ${
+              confianzaExtraccion === 'alta'
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+                : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200'
+            }`}
+          >
+            <Sparkles className="w-4 h-4 flex-shrink-0 mt-0.5 text-[#2CAE4A]" />
+            <div className="space-y-0.5">
+              <span className="font-bold">
+                Lectura DIAN ({confianzaExtraccion === 'alta' ? 'Confianza Alta' : 'Revisión Requerida'}):
+              </span>
+              <p className="text-[11px] opacity-90">{mensajeDiagnostico}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Alerta de CUFE Duplicado */}
+        {infoDuplicado?.duplicado && (
+          <div className="p-4 bg-rose-50 dark:bg-rose-950/60 border-2 border-rose-400 text-rose-800 dark:text-rose-200 rounded-2xl space-y-1.5 text-xs animate-shake">
+            <div className="flex items-center gap-2 font-black text-rose-900 dark:text-rose-100 text-sm">
+              <AlertTriangle className="w-5 h-5 text-rose-600" />
+              <span>¡FACTURA DUPLICADA DETECTADA!</span>
+            </div>
+            <p>
+              Este CUFE ya fue legalizado anteriormente en Colaves por{' '}
+              <strong>{infoDuplicado.registrado_por}</strong> ({infoDuplicado.cargo || 'Funcionario'}) el{' '}
+              <strong>
+                {infoDuplicado.fecha_registro
+                  ? new Date(infoDuplicado.fecha_registro).toLocaleDateString('es-CO')
+                  : 'fecha previa'}
+              </strong>.
+            </p>
+            <p className="text-[11px] font-semibold text-rose-700 dark:text-rose-300">
+              Por auditoría interna, no es posible radicar la misma factura dos veces.
+            </p>
+          </div>
+        )}
+
+        {/* Alerta de Descuadre Aritmético (Bloqueante, sin checkbox) */}
+        {!checkAritmetica.cuadra && (
+          <div className="p-4 bg-rose-50 dark:bg-rose-950/50 border-2 border-rose-300 text-rose-800 dark:text-rose-200 rounded-2xl text-xs space-y-2">
+            <div className="flex items-center gap-2 font-black text-rose-900 dark:text-rose-100">
+              <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0" />
+              <span>Descuadre Aritmético: Neto + IVA ≠ Total</span>
+            </div>
+            <p className="text-[11px] leading-relaxed">
+              Neto ($ {formatCOP(valorNeto || 0)}) + IVA ($ {formatCOP(iva || 0)}) = $ {formatCOP(checkAritmetica.sumaEsperada)}, existiendo una diferencia de $ {formatCOP(checkAritmetica.diferencia)} frente al Total ($ {formatCOP(total || 0)}).
+            </p>
+            <p className="text-[11px] font-bold text-rose-700 dark:text-rose-300 bg-white/60 dark:bg-slate-900/60 p-2 rounded-xl">
+              Para asegurar la exactitud contable, debe presionar "Repetir Fotografía" para recapturar la factura con mayor nitidez.
+            </p>
+          </div>
+        )}
+
+        {/* Alerta de Error Global */}
+        {errorGlobal && (
+          <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-300 text-rose-700 dark:text-rose-200 text-xs rounded-xl">
+            {errorGlobal}
+          </div>
+        )}
+
+        {/* SECCIÓN 1: DATOS LEÍDOS DE LA FACTURA (MODO SOLO LECTURA ESTRICTO) */}
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+          <div className="flex items-center justify-between border-b pb-2 dark:border-slate-800">
+            <div className="flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-[#07426B] dark:text-blue-400" />
+              <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                1. Datos Fiscales Identificados (Solo Lectura)
+              </h4>
+            </div>
+            <span className="flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+              <Lock className="w-3 h-3" /> Protegido
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-bold text-slate-500 mb-1">
+                Emisor / Razón Social:
+              </label>
+              <div className="w-full text-xs p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-semibold text-slate-800 dark:text-slate-200">
+                {emisor || <span className="text-amber-600 dark:text-amber-400 font-normal">No identificado</span>}
+              </div>
             </div>
 
-            {/* Cadena QR DIAN detectada */}
-            {qrDian && (
-              <div className="p-2.5 bg-slate-50 dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-slate-800 text-[10px] space-y-1">
-                <div className="flex items-center gap-1.5 font-bold text-slate-600 dark:text-slate-400">
-                  <QrCode className="w-3.5 h-3.5 text-blue-500" />
-                  <span>Parámetros QR DIAN Detectados:</span>
-                </div>
-                <p className="font-mono text-slate-600 dark:text-slate-300 break-all select-all leading-tight bg-white dark:bg-slate-800/80 p-2 rounded-xl border border-slate-200 dark:border-slate-700">
-                  {qrDian}
-                </p>
+            <div>
+              <label className="block text-[11px] font-bold text-slate-500 mb-1">
+                NIT del Emisor:
+              </label>
+              <div className="w-full text-xs p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-mono text-slate-800 dark:text-slate-200">
+                {nitEmisor || <span className="text-slate-400">No especificado</span>}
               </div>
-            )}
+            </div>
+          </div>
 
-            {/* Desglose de Valores y Alerta Aritmética */}
-            <div className="space-y-2 pt-1">
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Neto (COP) *
-                  </label>
-                  <input
-                    required
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={valorNeto || ''}
-                    onChange={(e) => setValorNeto(Number(e.target.value))}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    IVA (COP) *
-                  </label>
-                  <input
-                    required
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={iva}
-                    onChange={(e) => setIva(Number(e.target.value))}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Total (COP) *
-                  </label>
-                  <input
-                    required
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={total || ''}
-                    onChange={(e) => setTotal(Number(e.target.value))}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 font-bold text-emerald-600 dark:text-emerald-400"
-                  />
-                </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-bold text-slate-500 mb-1">
+                N° Factura:
+              </label>
+              <div className="w-full text-xs p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 font-mono font-bold text-slate-800 dark:text-slate-200">
+                {numeroFactura || <span className="text-amber-600 dark:text-amber-400 font-normal">No identificado</span>}
               </div>
+            </div>
 
-              {/* Indicador de comprobación aritmética */}
-              {!estadoAritmetica.cuadra ? (
-                <div className="p-2.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl space-y-2 text-[11px] text-amber-800 dark:text-amber-200">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
-                      <span>Diferencia contable: Neto + IVA no suma Total</span>
-                    </div>
-                    <span className="font-bold">
-                      Descuadre: {formatCOP(estadoAritmetica.diferencia)}
-                    </span>
-                  </div>
-                  <label className="flex items-center gap-2 cursor-pointer pt-1 border-t border-amber-200 dark:border-amber-800/60 text-slate-700 dark:text-slate-300">
-                    <input
-                      type="checkbox"
-                      checked={autorizarDiferenciaAritmetica}
-                      onChange={(e) => setAutorizarDiferenciaAritmetica(e.target.checked)}
-                      className="rounded text-emerald-600 focus:ring-emerald-500"
-                    />
-                    <span className="text-[10px] font-semibold">
-                      Autorizo radicar el gasto con diferencia aritmética justificada
-                    </span>
-                  </label>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold px-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Aritmética fiscal conforme: Neto + IVA = Total</span>
-                </div>
+            <div>
+              <label className="block text-[11px] font-bold text-slate-500 mb-1">
+                Fecha de Emisión:
+              </label>
+              <div className="w-full text-xs p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200">
+                {fechaEmision || <span className="text-amber-600 dark:text-amber-400 font-normal">No identificado</span>}
+              </div>
+            </div>
+          </div>
+
+          {/* CUFE de 96 caracteres */}
+          <div>
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
+                <KeyRound className="w-3.5 h-3.5 text-[#07426B]" />
+                Código CUFE / CUDE (96 hex):
+              </label>
+              <div className="flex items-center gap-1 text-[11px] font-mono">
+                {validandoCufe && <Loader2 className="w-3 h-3 animate-spin text-blue-500" />}
+                <span
+                  className={`font-bold px-2 py-0.5 rounded-full text-[10px] ${
+                    cufe && cufe.length === 96
+                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                      : 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
+                  }`}
+                >
+                  {cufe ? `${cufe.length}/96 hex` : 'No identificado'}
+                </span>
+              </div>
+            </div>
+
+            <div className="w-full font-mono text-[11px] p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 break-all leading-tight text-slate-800 dark:text-slate-200 select-all">
+              {cufe || (
+                <span className="text-rose-600 dark:text-rose-400 italic">
+                  No se identificó el CUFE de 96 caracteres. Repita la foto para capturarlo con nitidez.
+                </span>
               )}
             </div>
           </div>
 
-          {/* SECCIÓN 2: DATOS DEL RESPONSABLE Y CLASIFICACIÓN */}
-          <div className="bg-white dark:bg-slate-800 rounded-3xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
-            <div className="flex items-center gap-2 border-b pb-2 dark:border-slate-700">
-              <Briefcase className="w-4 h-4 text-emerald-600" />
-              <h4 className="text-xs font-black uppercase tracking-wider text-slate-500">
-                2. Datos Operacionales y Justificación
-              </h4>
+          {/* Parámetros QR DIAN si existen */}
+          {qrDian && (
+            <div className="p-2.5 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 text-[10px] space-y-1">
+              <div className="flex items-center gap-1.5 font-bold text-slate-600 dark:text-slate-400">
+                <QrCode className="w-3.5 h-3.5 text-blue-500" />
+                <span>Parámetros QR DIAN Detectados:</span>
+              </div>
+              <p className="font-mono text-slate-600 dark:text-slate-300 break-all select-all leading-tight bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700">
+                {qrDian}
+              </p>
+            </div>
+          )}
+
+          {/* Desglose de Valores */}
+          <div className="grid grid-cols-3 gap-2 pt-1 text-center">
+            <div className="p-2.5 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700">
+              <span className="text-[10px] text-slate-400 block font-semibold">Neto (COP)</span>
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                {valorNeto !== null ? `$ ${formatCOP(valorNeto)}` : 'No ident.'}
+              </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Responsable del Gasto *
-                </label>
-                <input
-                  required
-                  type="text"
-                  value={nombreResponsable}
-                  onChange={(e) => setNombreResponsable(e.target.value)}
-                  className="w-full text-xs p-3 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Cargo *
-                </label>
-                <input
-                  required
-                  type="text"
-                  value={cargo}
-                  onChange={(e) => setCargo(e.target.value)}
-                  className="w-full text-xs p-3 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900"
-                />
-              </div>
+            <div className="p-2.5 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700">
+              <span className="text-[10px] text-slate-400 block font-semibold">IVA (COP)</span>
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                {iva !== null ? `$ ${formatCOP(iva)}` : '$ 0'}
+              </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Tipo de Gasto *
-                </label>
-                <select
-                  required
-                  value={tipoGasto}
-                  onChange={(e) => setTipoGasto(e.target.value)}
-                  className="w-full text-xs p-3 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900"
-                >
-                  {catalogos.tiposGasto.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800">
+              <span className="text-[10px] text-[#206A3C] dark:text-emerald-400 block font-bold">Total (COP)</span>
+              <span className="text-xs font-black text-[#2CAE4A] dark:text-emerald-300">
+                {total !== null ? `$ ${formatCOP(total)}` : 'No ident.'}
+              </span>
+            </div>
+          </div>
+        </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Medio de Pago *
-                </label>
-                <select
-                  required
-                  value={tipoPago}
-                  onChange={(e) => setTipoPago(e.target.value)}
-                  className="w-full text-xs p-3 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900"
-                >
-                  {catalogos.tiposPago.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-              </div>
+        {/* SECCIÓN 2: CAMPOS MANUALES DE CLASIFICACIÓN Y JUSTIFICACIÓN */}
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+          <div className="flex items-center gap-2 border-b pb-2 dark:border-slate-800">
+            <Briefcase className="w-4 h-4 text-[#07426B] dark:text-blue-400" />
+            <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+              2. Clasificación y Justificación Operativa
+            </h4>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Responsable del Gasto:
+              </label>
+              <input
+                disabled
+                type="text"
+                value={usuario.nombre_completo}
+                className="w-full text-xs p-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-semibold text-slate-600 dark:text-slate-400 cursor-not-allowed"
+              />
             </div>
 
             <div>
               <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Objeto del Gasto / Justificación Operativa *
+                Cargo en Colaves:
               </label>
-              <textarea
-                required
-                rows={2}
-                value={objeto}
-                onChange={(e) => setObjeto(e.target.value)}
-                placeholder="Describa el motivo del gasto (ej: Tanqueo vehículo cuadrilla ruta Medellín-Bogotá)"
-                className="w-full text-xs p-3 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900"
+              <input
+                disabled
+                type="text"
+                value={usuario.cargo}
+                className="w-full text-xs p-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-semibold text-slate-600 dark:text-slate-400 cursor-not-allowed"
               />
             </div>
           </div>
 
-          {/* BOTÓN DE RADICACIÓN */}
-          <button
-            type="submit"
-            disabled={guardando || Boolean(infoDuplicado?.duplicado)}
-            className="w-full py-4 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 disabled:opacity-40 text-white font-black rounded-2xl shadow-xl shadow-emerald-600/30 active:scale-95 transition text-base flex items-center justify-center gap-2"
-          >
-            {guardando ? (
-              <>
-                <RefreshCw className="w-5 h-5 animate-spin" />
-                <span>Radicando Comprobante...</span>
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="w-5 h-5" />
-                <span>Radicar Legalización ({formatCOP(total)})</span>
-              </>
-            )}
-          </button>
-        </form>
-      )}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Tipo de Gasto *
+              </label>
+              <select
+                required
+                value={tipoGasto}
+                onChange={(e) => setTipoGasto(e.target.value)}
+                className="w-full text-xs p-3 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 font-semibold text-slate-800 dark:text-slate-200"
+              >
+                {catalogos.tiposGasto.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-      {/* Modal de Zoom de Fotografía del Comprobante */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                Medio de Desembolso *
+              </label>
+              <select
+                required
+                value={tipoPago}
+                onChange={(e) => setTipoPago(e.target.value)}
+                className="w-full text-xs p-3 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900 font-semibold text-slate-800 dark:text-slate-200"
+              >
+                {catalogos.tiposPago.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+              Objeto del Gasto / Justificación Operacional *
+            </label>
+            <textarea
+              required
+              rows={2}
+              value={objeto}
+              onChange={(e) => setObjeto(e.target.value)}
+              placeholder="Describa el motivo laboral del gasto (ej: Tanqueo de cuadrilla para inspección en granja San Antonio)"
+              className="w-full text-xs p-3 rounded-xl border border-slate-200 dark:border-slate-700 dark:bg-slate-900"
+            />
+          </div>
+        </div>
+
+        {/* Botón de Radicación Final */}
+        <button
+          type="submit"
+          disabled={guardando || Boolean(infoDuplicado?.duplicado) || !checkAritmetica.cuadra || !cufe}
+          className="w-full py-4 bg-[#2CAE4A] hover:bg-[#00984C] disabled:opacity-40 text-white font-black rounded-2xl shadow-xl shadow-[#2CAE4A]/25 active:scale-95 transition text-sm flex items-center justify-center gap-2"
+        >
+          {guardando ? (
+            <>
+              <RefreshCw className="w-5 h-5 animate-spin" />
+              <span>Radicando en Colaves...</span>
+            </>
+          ) : (
+            <>
+              <CheckCircle2 className="w-5 h-5" />
+              <span>Radicar Legalización ({total ? formatCOP(total) : '$ 0'})</span>
+            </>
+          )}
+        </button>
+      </form>
+
+      {/* Modal de Zoom de Fotografía */}
       {modalFotoZoom && fotoUrl && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md cursor-zoom-out"
@@ -934,7 +948,7 @@ export const WorkerExpenseForm: React.FC<Props> = ({
           >
             <div className="flex justify-between items-center border-b pb-2 dark:border-slate-800">
               <div className="flex items-center gap-2">
-                <Camera className="w-4 h-4 text-emerald-600" />
+                <Camera className="w-4 h-4 text-[#2CAE4A]" />
                 <h4 className="text-sm font-bold text-slate-900 dark:text-white">
                   Soporte Fotográfico Original
                 </h4>

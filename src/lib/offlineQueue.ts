@@ -1,5 +1,6 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
 import { Gasto } from '../types';
+import { getIdToken } from './firebaseClient';
 
 interface LegalizacionDB extends DBSchema {
   cola_offline: {
@@ -81,9 +82,15 @@ export async function sincronizarColaConServidor(
 
   for (const gasto of cola) {
     try {
+      const token = await getIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const resp = await fetch('/api/expenses', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(gasto),
       });
 

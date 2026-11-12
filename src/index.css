@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+@theme {
+  --color-colaves-blue: #07426B;
+  --color-colaves-blue-dark: #052F4D;
+  --color-colaves-blue-light: #0A5A91;
+  --color-colaves-green: #2CAE4A;
+  --color-colaves-green-dark: #206A3C;
+  --color-colaves-green-secondary: #00984C;
+}
+
 @layer base {
   body {
     touch-action: manipulation;
@@ -16,4 +25,20 @@
 
 .animate-shake {
   animation: shake 0.4s ease-in-out;
+}
+
+/* Custom scrollbars for clean SaaS UI */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.25);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.45);
 }

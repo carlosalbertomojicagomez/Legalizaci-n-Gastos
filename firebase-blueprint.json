@@ -1,0 +1,82 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Perfil de usuario del sistema de legalización con rol asignado por administración",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "UID de Firebase Auth" },
+        "email": { "type": "string", "format": "email", "description": "Correo corporativo" },
+        "nombre_completo": { "type": "string", "maxLength": 100, "description": "Nombre y apellidos" },
+        "cargo": { "type": "string", "maxLength": 80, "description": "Cargo u ocupación en la empresa" },
+        "rol": { "type": "string", "enum": ["trabajador", "administrador"], "description": "Rol de acceso" },
+        "creado_en": { "type": "string", "description": "Timestamp ISO" },
+        "actualizado_en": { "type": "string", "description": "Timestamp ISO" }
+      },
+      "required": ["id", "email", "nombre_completo", "cargo", "rol"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Comprobante de gasto legalizado ante DIAN con códigos fiscales y fotografía de soporte",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "description": "Identificador único" },
+        "user_id": { "type": "string", "maxLength": 128, "description": "UID del trabajador radicador" },
+        "emisor": { "type": "string", "maxLength": 150, "description": "Razón social del proveedor" },
+        "nit_emisor": { "type": "string", "maxLength": 30, "description": "NIT o cédula del emisor" },
+        "numero_factura": { "type": "string", "maxLength": 50, "description": "Número o consecutivo de factura" },
+        "cufe": { "type": "string", "maxLength": 96, "minLength": 96, "description": "Código CUFE de 96 caracteres hexadecimales" },
+        "qr_dian": { "type": "string", "maxLength": 500, "description": "Cadena o parámetros de código QR DIAN" },
+        "fecha_emision": { "type": "string", "description": "Fecha de expedición AAAA-MM-DD" },
+        "fecha_vencimiento": { "type": "string", "description": "Fecha de vencimiento AAAA-MM-DD" },
+        "valor_neto": { "type": "number", "description": "Subtotal antes de impuestos en COP" },
+        "iva": { "type": "number", "description": "Impuesto sobre las ventas en COP" },
+        "total": { "type": "number", "description": "Monto total liquidado en COP" },
+        "tipo_documento": { "type": "string", "description": "Tipo de comprobante tributario" },
+        "forma_pago": { "type": "string", "description": "Forma de pago (Contado/Crédito)" },
+        "medio_pago": { "type": "string", "description": "Medio de pago (Efectivo/Transferencia)" },
+        "nombre_responsable": { "type": "string", "maxLength": 100, "description": "Nombre del trabajador responsable" },
+        "cargo": { "type": "string", "maxLength": 80, "description": "Cargo del responsable" },
+        "tipo_gasto": { "type": "string", "maxLength": 80, "description": "Categoría contable" },
+        "tipo_pago": { "type": "string", "maxLength": 80, "description": "Medio de desembolso corporativo" },
+        "objeto": { "type": "string", "maxLength": 500, "description": "Justificación operativa del gasto" },
+        "foto_storage_path": { "type": "string", "description": "Ruta de archivo protegida de la fotografía de soporte" },
+        "foto_tomada_en": { "type": "string", "description": "Timestamp ISO exacto de captura con cámara en vivo" },
+        "estado": { "type": "string", "enum": ["pendiente", "aprobado", "rechazado"], "description": "Estado de auditoría" },
+        "confianza_extraccion": { "type": "string", "enum": ["alta", "media", "baja"], "description": "Confianza de IA" },
+        "mensaje_diagnostico": { "type": "string", "description": "Resultado de la verificación visual" },
+        "ia_raw_response": { "type": "string", "description": "JSON serializado del análisis crudo del modelo multimodal" },
+        "creado_en": { "type": "string", "description": "Timestamp ISO" },
+        "actualizado_en": { "type": "string", "description": "Timestamp ISO" },
+        "revisado_por": { "type": "string", "description": "UID o nombre del auditor que aprobó/rechazó" },
+        "comentario_aprobacion": { "type": "string", "maxLength": 500, "description": "Observación de auditoría" }
+      },
+      "required": ["id", "user_id", "emisor", "numero_factura", "cufe", "total", "estado", "creado_en"]
+    },
+    "Catalog": {
+      "title": "Catalog",
+      "description": "Catálogos operacionales de tipos de gasto y medios de pago",
+      "type": "object",
+      "properties": {
+        "tiposGasto": { "type": "array", "description": "Lista de categorías de gasto" },
+        "tiposPago": { "type": "array", "description": "Lista de medios de pago autorizados" },
+        "actualizado_en": { "type": "string", "description": "Timestamp ISO" }
+      },
+      "required": ["tiposGasto", "tiposPago"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Perfiles y roles de usuario gestionados por administradores"
+    },
+    "/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/Expense" },
+      "description": "Radicaciones de gastos operacionales con soporte fotográfico"
+    },
+    "/catalogs/{catalogId}": {
+      "schema": { "$ref": "#/entities/Catalog" },
+      "description": "Catálogos de configuración de la compañía"
+    }
+  }
+}

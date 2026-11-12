@@ -1,0 +1,68 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default Deny Catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isCurrentUser(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Role verification against server-stored profile or bootstrapped superadmin
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'carlosalbertomojicagomez@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.rol == 'administrador')
+      );
+    }
+
+    // USERS COLLECTION: Only admins can assign roles and manage users
+    match /users/{userId} {
+      allow get: if isCurrentUser(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin() || (
+        // Allow initial self-registration strictly as 'trabajador' if profile doesn't exist
+        isCurrentUser(userId) &&
+        !exists(/databases/$(database)/documents/users/$(userId)) &&
+        request.resource.data.rol == 'trabajador' &&
+        request.resource.data.id == userId
+      );
+    }
+
+    // EXPENSES COLLECTION: Workers create and read their own; Admins audit all
+    match /expenses/{expenseId} {
+      allow create: if isSignedIn() &&
+        isValidId(expenseId) &&
+        request.resource.data.user_id == request.auth.uid &&
+        request.resource.data.cufe is string &&
+        request.resource.data.cufe.size() == 96 &&
+        request.resource.data.total is number &&
+        request.resource.data.estado in ['pendiente', 'aprobado', 'rechazado'];
+
+      allow read: if isSignedIn() && (
+        resource.data.user_id == request.auth.uid || isAdmin()
+      );
+
+      // Only administrators can review, approve, or reject expenses
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // CATALOGS COLLECTION: Read-only for workers; modified only by administrators
+    match /catalogs/{catalogId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}

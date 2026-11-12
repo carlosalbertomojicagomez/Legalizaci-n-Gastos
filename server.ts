@@ -1,47 +1,86 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
 import { GoogleGenAI, Type } from '@google/genai';
 import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
+import { getApps, initializeApp, getApp } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
+import firebaseConfig from './firebase-applet-config.json' with { type: 'json' };
 
 dotenv.config();
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-// Configuración de límites para permitir fotografías en Base64
+// Configuración de límites para permitir fotografías en Base64 de alta resolución
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Telemetría e inicialización oficial de Gemini SDK
+// ==========================================
+// INICIALIZACIÓN DE FIREBASE ADMIN / FIRESTORE
+// ==========================================
+const PROJECT_ID = firebaseConfig.projectId || 'just-now-q5v9p';
+const FIRESTORE_DB_ID =
+  firebaseConfig.firestoreDatabaseId ||
+  'ai-studio-legalizacindegas-4630c3f7-d6e5-451e-8566-9072a7af4d3c';
+
+if (!getApps().length) {
+  try {
+    initializeApp({
+      projectId: PROJECT_ID,
+    });
+  } catch (err) {
+    console.warn('Inicialización de firebase-admin sin credenciales de servicio:', err);
+  }
+}
+
+// Inicialización de Firestore
+let firestoreDb: any = null;
+try {
+  firestoreDb = getFirestore(FIRESTORE_DB_ID);
+} catch (e) {
+  try {
+    firestoreDb = getFirestore();
+  } catch (err) {
+    console.warn('Firestore admin fallback a almacenamiento persistente protegido:', err);
+  }
+}
+
+// Directorio protegido de almacenamiento de fotografías (NO es público)
+const DATA_DIR = path.resolve(process.cwd(), 'data');
+const PROTECTED_UPLOADS_DIR = path.join(DATA_DIR, 'protected_uploads');
+const PERSISTENT_STORE_FILE = path.join(DATA_DIR, 'colaves_expenses_store.json');
+
+if (!fs.existsSync(PROTECTED_UPLOADS_DIR)) {
+  fs.mkdirSync(PROTECTED_UPLOADS_DIR, { recursive: true });
+}
+
+// Eliminar cualquier data/db.json previo con datos de prueba
+const OLD_DB_FILE = path.join(DATA_DIR, 'db.json');
+if (fs.existsSync(OLD_DB_FILE)) {
+  try {
+    fs.unlinkSync(OLD_DB_FILE);
+    console.log('Archivo data/db.json de demostración eliminado exitosamente.');
+  } catch (e) {
+    console.warn('Aviso limpiando db.json:', e);
+  }
+}
+
+// ==========================================
+// INICIALIZACIÓN DE GEMINI SDK (SERVER-SIDE)
+// ==========================================
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY || '',
   httpOptions: {
     headers: {
-      'User-Agent': 'aistudio-build',
+      'User-Agent': 'colaves-legalizacion-gastos',
     },
   },
 });
 
-// Directorio y archivo de persistencia local
-const DATA_DIR = path.resolve(process.cwd(), 'data');
-const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
-const DB_FILE = path.join(DATA_DIR, 'db.json');
-
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
-app.use('/uploads', express.static(UPLOADS_DIR));
-
-interface DatabaseSchema {
-  expenses: any[];
-  catalogs: {
-    tiposGasto: string[];
-    tiposPago: string[];
-  };
-}
-
+// Catálogos iniciales por defecto de Colaves
 const DEFAULT_CATALOGS = {
   tiposGasto: [
     'Alimentación / Viáticos',
@@ -55,132 +94,249 @@ const DEFAULT_CATALOGS = {
   ],
   tiposPago: [
     'Efectivo / Caja menor',
-    'Tarjeta corporativa',
+    'Tarjeta corporativa Colaves',
     'Transferencia Bancolombia',
     'Transferencia Nequi / Daviplata',
   ],
 };
 
-const SEED_EXPENSES = [
-  {
-    id: 'exp-col-001',
-    creado_en: new Date(Date.now() - 3600000 * 48).toISOString(),
-    user_id: 'usr_carlos',
-    emisor: 'ORGANIZACION TERPEL S.A.',
-    numero_factura: 'TERP-90231',
-    cufe: 'a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890',
-    fecha_emision: new Date(Date.now() - 3600000 * 48).toISOString().split('T')[0],
-    fecha_vencimiento: new Date(Date.now() - 3600000 * 48).toISOString().split('T')[0],
-    valor_neto: 180000,
-    iva: 34200,
-    total: 214200,
-    nombre_responsable: 'Carlos Alberto Mojica',
-    cargo: 'Coordinador de Operaciones de Campo',
-    tipo_gasto: 'Combustible',
-    tipo_pago: 'Tarjeta corporativa',
-    objeto: 'Tanqueo de camioneta de cuadrilla para inspección técnica en ruta',
-    foto_path: 'terpel_factura_evidencia.jpg',
-    foto_url: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=500&q=80',
-    foto_tomada_en: new Date(Date.now() - 3600000 * 48).toISOString(),
-    estado: 'aprobado',
-    comentario_aprobacion: 'Comprobante y CUFE validados en auditoría.',
-  },
-  {
-    id: 'exp-col-002',
-    creado_en: new Date(Date.now() - 3600000 * 20).toISOString(),
-    user_id: 'usr_andrea',
-    emisor: 'AUTOPISTAS DEL CAFE S.A.',
-    numero_factura: 'PEA-88192',
-    cufe: 'b2c3d4e5f6a17890b2c3d4e5f6a17890b2c3d4e5f6a17890b2c3d4e5f6a17890b2c3d4e5f6a17890b2c3d4e5f6a17890',
-    fecha_emision: new Date(Date.now() - 3600000 * 20).toISOString().split('T')[0],
-    fecha_vencimiento: null,
-    valor_neto: 31200,
-    iva: 0,
-    total: 31200,
-    nombre_responsable: 'Andrea Gómez',
-    cargo: 'Ingeniera de Mantenimiento',
-    tipo_gasto: 'Peajes / Parqueaderos',
-    tipo_pago: 'Efectivo / Caja menor',
-    objeto: 'Peaje Corozal traslado a estación de bombeo',
-    foto_path: 'peaje_factura.jpg',
-    foto_url: 'https://images.unsplash.com/photo-1554224154-26032ffc0d07?w=500&q=80',
-    foto_tomada_en: new Date(Date.now() - 3600000 * 20).toISOString(),
-    estado: 'pendiente',
-    comentario_aprobacion: null,
-  },
-  {
-    id: 'exp-col-003',
-    creado_en: new Date(Date.now() - 3600000 * 5).toISOString(),
-    user_id: 'usr_carlos',
-    emisor: 'RESTAURANTE EL PORTON BOYACENSE S.A.S.',
-    numero_factura: 'FAC-14902',
-    cufe: 'c3d4e5f6a1b27890c3d4e5f6a1b27890c3d4e5f6a1b27890c3d4e5f6a1b27890c3d4e5f6a1b27890c3d4e5f6a1b27890',
-    fecha_emision: new Date().toISOString().split('T')[0],
-    fecha_vencimiento: null,
-    valor_neto: 55000,
-    iva: 4400,
-    total: 59400,
-    nombre_responsable: 'Carlos Alberto Mojica',
-    cargo: 'Coordinador de Operaciones de Campo',
-    tipo_gasto: 'Alimentación / Viáticos',
-    tipo_pago: 'Efectivo / Caja menor',
-    objeto: 'Almuerzo de trabajo equipo de técnicos en campo',
-    foto_path: 'restaurante_boyacense.jpg',
-    foto_url: 'https://images.unsplash.com/photo-1450133064473-71024230f91b?w=500&q=80',
-    foto_tomada_en: new Date(Date.now() - 3600000 * 5).toISOString(),
-    estado: 'pendiente',
-    comentario_aprobacion: null,
-  },
-];
+// ==========================================
+// ALMACENAMIENTO PERSISTENTE DE RESPALDO (REAL, SIN MOCKS)
+// ==========================================
+interface LocalStore {
+  expenses: any[];
+  users: any[];
+  catalogs: {
+    tiposGasto: string[];
+    tiposPago: string[];
+  };
+}
 
-function readDB(): DatabaseSchema {
+function readLocalStore(): LocalStore {
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    if (!fs.existsSync(DB_FILE)) {
-      const initial: DatabaseSchema = {
-        expenses: SEED_EXPENSES,
+    if (!fs.existsSync(PERSISTENT_STORE_FILE)) {
+      const initial: LocalStore = {
+        expenses: [],
+        users: [
+          {
+            id: 'carlos_admin_default',
+            email: 'carlosalbertomojicagomez@gmail.com',
+            nombre_completo: 'Carlos Alberto Mojica',
+            cargo: 'Auditor Senior / Administrador',
+            rol: 'administrador',
+            creado_en: new Date().toISOString(),
+          },
+        ],
         catalogs: DEFAULT_CATALOGS,
       };
-      fs.writeFileSync(DB_FILE, JSON.stringify(initial, null, 2), 'utf-8');
+      fs.writeFileSync(PERSISTENT_STORE_FILE, JSON.stringify(initial, null, 2), 'utf-8');
       return initial;
     }
-    const raw = fs.readFileSync(DB_FILE, 'utf-8');
+    const raw = fs.readFileSync(PERSISTENT_STORE_FILE, 'utf-8');
     const parsed = JSON.parse(raw);
-    if (!parsed.expenses || !Array.isArray(parsed.expenses)) {
-      parsed.expenses = SEED_EXPENSES;
-    }
-    if (!parsed.catalogs) {
-      parsed.catalogs = DEFAULT_CATALOGS;
-    }
-    return parsed;
+    return {
+      expenses: Array.isArray(parsed.expenses) ? parsed.expenses : [],
+      users: Array.isArray(parsed.users) ? parsed.users : [],
+      catalogs: parsed.catalogs || DEFAULT_CATALOGS,
+    };
   } catch (err) {
-    console.error('Error leyendo base de datos:', err);
-    return { expenses: SEED_EXPENSES, catalogs: DEFAULT_CATALOGS };
+    console.error('Error leyendo almacén local:', err);
+    return { expenses: [], users: [], catalogs: DEFAULT_CATALOGS };
   }
 }
 
-function writeDB(data: DatabaseSchema): void {
+function writeLocalStore(data: LocalStore): void {
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
-    notifySSE({ type: 'database_updated', timestamp: Date.now() });
+    fs.writeFileSync(PERSISTENT_STORE_FILE, JSON.stringify(data, null, 2), 'utf-8');
   } catch (err) {
-    console.error('Error escribiendo base de datos:', err);
+    console.error('Error escribiendo almacén local:', err);
   }
 }
 
-// Lista de clientes conectados a Server-Sent Events (SSE) para tiempo real
-const sseClients: Response[] = [];
+// ==========================================
+// AUTENTICACIÓN Y ROLES (RBAC) - MIDDLEWARE
+// ==========================================
+export interface AuthUser {
+  uid: string;
+  email: string;
+  name?: string;
+  role: 'trabajador' | 'administrador';
+  cargo?: string;
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      user?: AuthUser;
+    }
+  }
+}
+
+/**
+ * Valida criptográficamente el ID token de Firebase
+ */
+async function verifyFirebaseIdToken(
+  idToken: string
+): Promise<{ uid: string; email: string; name?: string } | null> {
+  // 1. Intentar con firebase-admin
+  try {
+    const decoded = await getAuth().verifyIdToken(idToken);
+    if (decoded && decoded.uid) {
+      return {
+        uid: decoded.uid,
+        email: decoded.email || '',
+        name: decoded.name || decoded.email?.split('@')[0],
+      };
+    }
+  } catch (e) {
+    // Si firebase-admin no tiene credenciales de servicio, continúa a endpoints estándar
+  }
+
+  // 2. Tokeninfo de Google OAuth2 (válido para tokens de Google / Firebase)
+  try {
+    const resp = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`
+    );
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.sub) {
+        return {
+          uid: data.sub,
+          email: data.email || '',
+          name: data.name || data.email?.split('@')[0],
+        };
+      }
+    }
+  } catch (e) {
+    // Continuar
+  }
+
+  // 3. Identity Toolkit de Firebase
+  try {
+    const apiKey = firebaseConfig.apiKey;
+    if (apiKey) {
+      const resp = await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken }),
+        }
+      );
+      if (resp.ok) {
+        const data = await resp.json();
+        const user = data.users?.[0];
+        if (user) {
+          return {
+            uid: user.localId,
+            email: user.email || '',
+            name: user.displayName || user.email?.split('@')[0],
+          };
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Fallo en verificación con IdentityToolkit:', e);
+  }
+
+  return null;
+}
+
+/**
+ * Middleware para exigir sesión válida en rutas /api/*
+ */
+async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  let token = '';
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split('Bearer ')[1].trim();
+  } else if (typeof req.query.token === 'string' && req.query.token) {
+    token = req.query.token;
+  }
+
+  if (!token) {
+    res.status(401).json({
+      error: 'Acceso no autorizado: Se requiere token de autenticación válido.',
+    });
+    return;
+  }
+
+  const tokenPayload = await verifyFirebaseIdToken(token);
+
+  if (!tokenPayload) {
+    res.status(401).json({
+      error: 'Sesión inválida o expirada. Inicie sesión nuevamente en Colaves.',
+    });
+    return;
+  }
+
+  // Determinar rol del usuario desde Firestore o almacén persistente
+  let userRole: 'trabajador' | 'administrador' = 'trabajador';
+  let userCargo = 'Funcionario de Campo';
+  let userName = tokenPayload.name || tokenPayload.email.split('@')[0];
+
+  // Superadministrador inicial de la plataforma
+  if (tokenPayload.email.toLowerCase() === 'carlosalbertomojicagomez@gmail.com') {
+    userRole = 'administrador';
+    userCargo = 'Auditor General / Administrador';
+  } else {
+    // Consultar Firestore
+    try {
+      if (firestoreDb) {
+        const userDoc = await firestoreDb.collection('users').doc(tokenPayload.uid).get();
+        if (userDoc.exists) {
+          const userData = userDoc.data();
+          if (userData?.rol) userRole = userData.rol;
+          if (userData?.cargo) userCargo = userData.cargo;
+          if (userData?.nombre_completo) userName = userData.nombre_completo;
+        }
+      }
+    } catch (err) {
+      // Fallback a almacén local
+      const store = readLocalStore();
+      const localUser = store.users.find(
+        (u) => u.id === tokenPayload.uid || u.email.toLowerCase() === tokenPayload.email.toLowerCase()
+      );
+      if (localUser) {
+        userRole = localUser.rol;
+        userCargo = localUser.cargo;
+        userName = localUser.nombre_completo;
+      }
+    }
+  }
+
+  req.user = {
+    uid: tokenPayload.uid,
+    email: tokenPayload.email,
+    name: userName,
+    role: userRole,
+    cargo: userCargo,
+  };
+
+  next();
+}
+
+/**
+ * Middleware para restringir rutas exclusivamente a administradores
+ */
+function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!req.user || req.user.role !== 'administrador') {
+    res.status(403).json({
+      error: 'Acceso restringido: Se requieren permisos de Administrador para esta operación.',
+    });
+    return;
+  }
+  next();
+}
+
+// Canales SSE para notificaciones y tiempo real del panel
+const sseClients: { res: Response; userId?: string; role?: string }[] = [];
 
 function notifySSE(payload: any) {
   const msg = `data: ${JSON.stringify(payload)}\n\n`;
   for (let i = sseClients.length - 1; i >= 0; i--) {
     try {
-      sseClients[i].write(msg);
+      sseClients[i].res.write(msg);
     } catch {
       sseClients.splice(i, 1);
     }
@@ -188,7 +344,7 @@ function notifySSE(payload: any) {
 }
 
 // ==========================================
-// RUTAS DE API
+// RUTAS DE LA API
 // ==========================================
 
 // 1. Canal Realtime con Server-Sent Events (SSE)
@@ -199,190 +355,236 @@ app.get('/api/expenses/stream', (req: Request, res: Response) => {
     Connection: 'keep-alive',
   });
   res.write('data: {"type":"connected"}\n\n');
-  sseClients.push(res);
+  sseClients.push({ res });
 
   req.on('close', () => {
-    const idx = sseClients.indexOf(res);
+    const idx = sseClients.findIndex((c) => c.res === res);
     if (idx !== -1) sseClients.splice(idx, 1);
   });
 });
 
-// 2. Extracción de Factura con IA de Visión Real (Gemini 3.8 Flash)
-app.post('/api/extract-invoice', async (req: Request, res: Response) => {
+// 2. Perfil del Usuario Autenticado
+app.get('/api/auth/me', requireAuth, async (req: Request, res: Response) => {
+  res.json({
+    id: req.user!.uid,
+    email: req.user!.email,
+    nombre_completo: req.user!.name,
+    cargo: req.user!.cargo,
+    rol: req.user!.role,
+  });
+});
+
+// 3. Extracción de Factura con IA de Visión (Gemini Flash Multimodal con doble lectura CUFE)
+app.post('/api/extract-invoice', requireAuth, async (req: Request, res: Response) => {
   try {
     const { imageBase64, mimeType = 'image/jpeg' } = req.body;
     if (!imageBase64) {
-      res.status(400).json({ error: 'No se recibió la imagen de la factura' });
+      res.status(400).json({ error: 'No se recibió la imagen de la factura para analizar.' });
       return;
     }
 
     if (!process.env.GEMINI_API_KEY) {
       res.status(503).json({
-        error: 'Servicio de reconocimiento visual no disponible: GEMINI_API_KEY no configurada.',
+        error: 'Servicio de visión no configurado: GEMINI_API_KEY ausente en variables de entorno.',
         error_extraccion: true,
         confianza_extraccion: 'baja',
-        mensaje_diagnostico: 'Configure la clave GEMINI_API_KEY en el servidor para habilitar el análisis visual automático.',
+        mensaje_diagnostico:
+          'La clave GEMINI_API_KEY no está configurada en el servidor. Debe ingresarse en el panel de Secrets.',
       });
       return;
     }
 
     const cleanBase64 = imageBase64.replace(/^data:image\/[a-z]+;base64,/, '');
 
-    const prompt = `
-Eres un auditor tributario y perito en Facturación Electrónica de la DIAN en Colombia.
-Analiza con el mayor rigor técnico la fotografía de esta factura física, electrónica o tiquete equivalente.
+    const promptPrincipal = `
+Eres el motor de análisis fiscal y tributario para COLAVES S.A.S. en Colombia.
+Analiza minuciosamente la fotografía de esta factura física o electrónica emitida bajo normas de la DIAN.
 
-INSTRUCCIONES DE EXTRACCIÓN REAL:
-1. "emisor": Nombre comercial o razón social completa del emisor/proveedor tal como aparece impreso en el encabezado.
-2. "nit_emisor": Número de Identificación Tributaria (NIT) del proveedor con o sin dígito de verificación (ej: "900.123.456-7" o "860000000-1").
-3. "numero_factura": Prefijo y consecutivo oficial de la factura (ej: "FE-1029", "SETP-9921", "B-4920", "POS-00129").
-4. "cufe": Código Único de Factura Electrónica (o CUDE si es documento soporte).
-   - Consta de exactamente 96 caracteres hexadecimales (dígitos 0-9 y letras a-f o A-F).
-   - Búscalo en el bloque de texto con la etiqueta "CUFE", "CUDE", "Código de Seguridad", o decodifica el parámetro "CUFE=" dentro de la cadena del código QR DIAN si está visible.
-   - Si identificas los 96 caracteres, devuélvelo en minúsculas sin espacios ni saltos de línea.
-   - Si no es 100% legible o no tiene exactamente 96 caracteres, devuelve null. NUNCA inventes caracteres.
-5. "qr_dian": Si la imagen contiene un código QR o la cadena de texto DIAN (ej: NumFac=...&NitFac=...&ValTolFac=...&CUFE=... o enlace de consulta catalogo-vpfe.dian.gov.co), extrae el texto completo o la URL. Si no existe, null.
-6. "fecha_emision": Fecha de emisión en formato estándar YYYY-MM-DD.
-7. "fecha_vencimiento": Fecha de vencimiento si aparece en formato YYYY-MM-DD, o null.
-8. "valor_neto": Subtotal o base gravable antes de impuestos como número en pesos colombianos COP (sin comas ni símbolos).
-9. "iva": Monto total liquidado por IVA o Impoconsumo como número en COP. Si está exento o no aplica, 0.
-10. "total": Total a pagar en pesos colombianos (COP) como número entero o flotante.
-11. "concepto_sugerido": Breve descripción del objeto o producto principal facturado (ej: "Combustible Diesel", "Alimentación viáticos", "Hospedaje", "Peaje vehicular", "Mantenimiento preventivo").
-12. "tipo_documento": "01 - Factura Electrónica de Venta", "05 - Documento Soporte" o "Tiquete POS / Equivalente".
-13. "forma_pago": "Contado" o "Crédito".
-14. "medio_pago": "Efectivo", "Tarjeta / Transferencia" o "Bancarizado".
-15. "confianza_extraccion": "alta" si el CUFE y total fueron claramente identificados, "media" si se leyó el total y emisor pero CUFE requiere verificación manual, "baja" si la foto está borrosa o ilegible.
-16. "mensaje_diagnostico": Explicación concisa en español de los campos identificados con certeza y advertencias sobre datos que requieran corroboración visual.
+REGLAS ESTRICTAS DE EXTRACCIÓN REAL:
+- Emisor: Razón social exacta o nombre comercial del proveedor impreso en el encabezado.
+- nit_emisor: NIT del proveedor con dígito de verificación si aparece (ej: "860.005.224-6" o "901234567-8").
+- numero_factura: Prefijo y consecutivo oficial de la factura (ej: "FE-1290", "SETP-990", "POS-102").
+- cufe: Código Único de Factura Electrónica (o CUDE si es documento soporte).
+  * Consta de EXACTAMENTE 96 caracteres hexadecimales (0-9, a-f).
+  * Si la imagen contiene código QR de la DIAN, puedes leer el parámetro "CUFE=" dentro de la cadena.
+  * Si no es legible o no tiene exactamente 96 caracteres, devuelve null. NUNCA inventes caracteres.
+- qr_dian: Cadena de parámetros de control DIAN (NumFac=...&NitFac=...&ValFac=...&CUFE=...) o enlace catalogo-vpfe.dian.gov.co. Si no hay, null.
+- fecha_emision: Fecha de emisión en formato YYYY-MM-DD.
+- fecha_vencimiento: Fecha de vencimiento si existe en formato YYYY-MM-DD, de lo contrario null.
+- valor_neto: Subtotal o base gravable en COP como número sin separadores.
+- iva: Monto total liquidado por IVA o Impoconsumo en COP. Si está exento o no aplica, 0.
+- total: Total a pagar en pesos colombianos (COP) como número entero o flotante.
+- tipo_documento: "Factura Electrónica de Venta", "Documento Soporte" o "Tiquete POS / Equivalente".
+- forma_pago: "Contado" o "Crédito".
+- medio_pago: "Efectivo", "Tarjeta / Transferencia" o "Bancarizado".
+- concepto_sugerido: Breve justificación sugerida del gasto (ej: "Combustible ruta", "Alimentación viáticos", "Peaje vehicular", "Mantenimiento").
 
-REGLA ESTRICTA: Lee ÚNICAMENTE lo que esté efectivamente plasmado en la fotografía. NUNCA inventes o deduzcas datos inexistentes.
+NUNCA inventes datos. Si un campo no es identificable en la fotografía, asigna null.
 `;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType,
-              data: cleanBase64,
+    let response: any;
+    let modelName = 'gemini-2.5-flash';
+
+    try {
+      response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: {
+          parts: [
+            { inlineData: { mimeType, data: cleanBase64 } },
+            { text: promptPrincipal },
+          ],
+        },
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              emisor: { type: Type.STRING },
+              nit_emisor: { type: Type.STRING },
+              numero_factura: { type: Type.STRING },
+              cufe: { type: Type.STRING },
+              qr_dian: { type: Type.STRING },
+              fecha_emision: { type: Type.STRING },
+              fecha_vencimiento: { type: Type.STRING },
+              valor_neto: { type: Type.NUMBER },
+              iva: { type: Type.NUMBER },
+              total: { type: Type.NUMBER },
+              tipo_documento: { type: Type.STRING },
+              forma_pago: { type: Type.STRING },
+              medio_pago: { type: Type.STRING },
+              concepto_sugerido: { type: Type.STRING },
             },
           },
-          { text: prompt },
-        ],
-      },
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            emisor: { type: Type.STRING },
-            nit_emisor: { type: Type.STRING },
-            numero_factura: { type: Type.STRING },
-            cufe: { type: Type.STRING },
-            qr_dian: { type: Type.STRING },
-            fecha_emision: { type: Type.STRING },
-            fecha_vencimiento: { type: Type.STRING },
-            valor_neto: { type: Type.NUMBER },
-            iva: { type: Type.NUMBER },
-            total: { type: Type.NUMBER },
-            concepto_sugerido: { type: Type.STRING },
-            tipo_documento: { type: Type.STRING },
-            forma_pago: { type: Type.STRING },
-            medio_pago: { type: Type.STRING },
-            confianza_extraccion: { type: Type.STRING },
-            mensaje_diagnostico: { type: Type.STRING },
-          },
         },
-      },
-    });
-
-    const text = response.text || '{}';
-    let parsed: any;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      parsed = {
-        emisor: null,
-        nit_emisor: null,
-        numero_factura: null,
-        cufe: null,
-        qr_dian: null,
-        fecha_emision: new Date().toISOString().split('T')[0],
-        fecha_vencimiento: null,
-        valor_neto: 0,
-        iva: 0,
-        total: 0,
-        confianza_extraccion: 'baja',
-        mensaje_diagnostico: 'No se pudo interpretar el formato JSON de la respuesta de IA.',
-      };
+      });
+    } catch (err: any) {
+      console.warn('Intento con gemini-2.5-flash falló, probando gemini-3.8-flash:', err.message);
+      modelName = 'gemini-3.8-flash';
+      response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: {
+          parts: [
+            { inlineData: { mimeType, data: cleanBase64 } },
+            { text: promptPrincipal },
+          ],
+        },
+      });
     }
 
-    // Post-procesamiento y validación rigurosa del CUFE (96 caracteres hexadecimales)
-    let cufeEncontrado: string | null = null;
-
-    if (parsed.cufe) {
-      const cufeClean = String(parsed.cufe).trim().toLowerCase().replace(/[^a-f0-9]/g, '');
-      if (cufeClean.length === 96) {
-        cufeEncontrado = cufeClean;
+    const rawResponseText = response.text || '{}';
+    let parsed: any = {};
+    try {
+      parsed = JSON.parse(rawResponseText);
+    } catch {
+      const matchJson = rawResponseText.match(/\{[\s\S]*\}/);
+      if (matchJson) {
+        parsed = JSON.parse(matchJson[0]);
       }
     }
 
-    // Si no vino en el campo cufe directo, buscar en qr_dian o en el texto crudo
+    // Validación rigurosa de 96 caracteres hexadecimales para el CUFE
+    let cufeEncontrado: string | null = null;
+    if (parsed.cufe) {
+      const clean = String(parsed.cufe).trim().toLowerCase().replace(/[^a-f0-9]/g, '');
+      if (clean.length === 96) cufeEncontrado = clean;
+    }
+
+    // Búsqueda en QR DIAN
     if (!cufeEncontrado && parsed.qr_dian) {
       const matchQr = String(parsed.qr_dian).match(/[a-fA-F0-9]{96}/);
-      if (matchQr) {
-        cufeEncontrado = matchQr[0].toLowerCase();
+      if (matchQr) cufeEncontrado = matchQr[0].toLowerCase();
+    }
+
+    // SEGUNDA LECTURA ENFOCADA (único reintento si no se encontró en la primera pasada)
+    if (!cufeEncontrado) {
+      try {
+        const cufePassResponse = await ai.models.generateContent({
+          model: modelName,
+          contents: {
+            parts: [
+              { inlineData: { mimeType, data: cleanBase64 } },
+              {
+                text: 'Localiza EXCLUSIVAMENTE el código CUFE (o CUDE) o el código QR de esta factura DIAN de Colombia. Responde únicamente con el valor hexadecimal de 96 caracteres o el contenido decodificado del QR.',
+              },
+            ],
+          },
+        });
+        const secondText = cufePassResponse.text || '';
+        const matchSecond = secondText.match(/[a-fA-F0-9]{96}/);
+        if (matchSecond) {
+          cufeEncontrado = matchSecond[0].toLowerCase();
+        }
+      } catch (e) {
+        console.warn('Segunda lectura de CUFE no concluyente:', e);
       }
     }
 
-    // Asignar el CUFE validado o null si no cumplió los 96 caracteres
-    parsed.cufe = cufeEncontrado;
+    parsed.cufe = cufeEncontrado; // queda con 96 hex o null (marcado como "No identificado")
+    parsed.ia_raw_response = rawResponseText;
 
-    // Ajustar diagnóstico de confianza
+    // Diagnóstico y confianza
     if (parsed.cufe && parsed.total > 0 && parsed.emisor) {
       parsed.confianza_extraccion = 'alta';
-      if (!parsed.mensaje_diagnostico) {
-        parsed.mensaje_diagnostico = 'Factura leída con éxito: CUFE de 96 caracteres, valores y emisor confirmados.';
-      }
+      parsed.mensaje_diagnostico =
+        'Lectura fiscal conforme: CUFE de 96 caracteres, valores numéricos y emisor identificados con certeza.';
     } else if (parsed.total > 0 && parsed.emisor) {
       parsed.confianza_extraccion = 'media';
-      if (!parsed.mensaje_diagnostico) {
-        parsed.mensaje_diagnostico = 'Se identificó el proveedor y valores. El CUFE de 96 caracteres requiere verificación manual.';
-      }
+      parsed.mensaje_diagnostico =
+        'Se identificaron los montos y emisor. El código CUFE de 96 caracteres no fue detectable con nitidez.';
     } else {
       parsed.confianza_extraccion = 'baja';
-      if (!parsed.mensaje_diagnostico) {
-        parsed.mensaje_diagnostico = 'La foto requiere mejor iluminación o enfoque para leer todos los datos fiscales.';
-      }
+      parsed.mensaje_diagnostico =
+        'La imagen no presenta nitidez suficiente para extraer todos los datos fiscales. Se sugiere repetir la foto con mejor enfoque e iluminación.';
     }
 
     res.json(parsed);
   } catch (error: any) {
-    console.error('Error en extracción real con Gemini Vision:', error);
-    res.status(200).json({
-      emisor: null,
-      nit_emisor: null,
-      numero_factura: null,
-      cufe: null,
-      qr_dian: null,
-      fecha_emision: new Date().toISOString().split('T')[0],
-      fecha_vencimiento: null,
-      valor_neto: 0,
-      iva: 0,
-      total: 0,
-      confianza_extraccion: 'baja',
-      mensaje_diagnostico: `Aviso del motor de visión: ${error.message || 'Error al procesar la imagen'}. Por favor revise la fotografía adjunta y complete los campos.`,
+    console.error('Error en extracción visual con Gemini:', error);
+    res.status(500).json({
+      error: `Error al procesar la factura con el motor de visión: ${error.message || 'Error desconocido'}`,
       error_extraccion: true,
+      confianza_extraccion: 'baja',
     });
   }
 });
 
-// 3. Verificación de CUFE duplicado
-app.get('/api/check-cufe/:cufe', (req: Request, res: Response) => {
+// 4. Verificación de CUFE duplicado en toda la base de datos (sin exponer registros de otros trabajadores)
+app.get('/api/check-cufe/:cufe', requireAuth, async (req: Request, res: Response) => {
   const cufeToCheck = String(req.params.cufe || '').trim().toLowerCase();
-  const db = readDB();
+  if (cufeToCheck.length !== 96) {
+    res.json({ duplicado: false });
+    return;
+  }
 
-  const match = db.expenses.find(
+  try {
+    // 1. Consultar Firestore
+    if (firestoreDb) {
+      const snap = await firestoreDb
+        .collection('expenses')
+        .where('cufe', '==', cufeToCheck)
+        .limit(1)
+        .get();
+
+      if (!snap.empty) {
+        const docData = snap.docs[0].data();
+        res.json({
+          duplicado: true,
+          registrado_por: docData.nombre_responsable || 'Otro funcionario',
+          cargo: docData.cargo || 'Funcionario',
+          fecha_registro: docData.creado_en,
+          numero_factura: docData.numero_factura,
+          emisor: docData.emisor,
+        });
+        return;
+      }
+    }
+  } catch (err) {
+    console.warn('Consulta CUFE en Firestore falló, verificando almacén local:', err);
+  }
+
+  // 2. Consultar almacén persistente de respaldo
+  const store = readLocalStore();
+  const match = store.expenses.find(
     (g) => String(g.cufe || '').trim().toLowerCase() === cufeToCheck
   );
 
@@ -395,101 +597,117 @@ app.get('/api/check-cufe/:cufe', (req: Request, res: Response) => {
       numero_factura: match.numero_factura,
       emisor: match.emisor,
     });
-  } else {
-    res.json({ duplicado: false });
+    return;
   }
+
+  res.json({ duplicado: false });
 });
 
-// 4. Listar gastos con filtros opcionales
-app.get('/api/expenses', (req: Request, res: Response) => {
-  const db = readDB();
-  const { user_id, estado, search } = req.query;
+// 5. Listar gastos con RBAC estricto:
+// - Trabajador: lee ÚNICAMENTE sus propios gastos
+// - Administrador: lee y gestiona los gastos de toda la compañía
+app.get('/api/expenses', requireAuth, async (req: Request, res: Response) => {
+  const user = req.user!;
+  const { estado, search } = req.query;
 
-  let result = [...db.expenses];
+  let gastos: any[] = [];
 
-  if (user_id) {
-    result = result.filter((g) => g.user_id === String(user_id));
+  try {
+    if (firestoreDb) {
+      let queryRef = firestoreDb.collection('expenses');
+      if (user.role === 'trabajador') {
+        queryRef = queryRef.where('user_id', '==', user.uid);
+      }
+      const snapshot = await queryRef.get();
+      snapshot.forEach((doc: any) => {
+        gastos.push({ id: doc.id, ...doc.data() });
+      });
+    }
+  } catch (err) {
+    console.warn('Consulta Firestore falló, leyendo almacén local:', err);
   }
+
+  if (gastos.length === 0) {
+    const store = readLocalStore();
+    gastos =
+      user.role === 'trabajador'
+        ? store.expenses.filter((g) => g.user_id === user.uid)
+        : [...store.expenses];
+  }
+
+  // Filtros opcionales
   if (estado && estado !== 'todos') {
-    result = result.filter((g) => g.estado === String(estado));
+    gastos = gastos.filter((g) => g.estado === String(estado));
   }
   if (search) {
     const s = String(search).toLowerCase();
-    result = result.filter(
+    gastos = gastos.filter(
       (g) =>
         (g.emisor && g.emisor.toLowerCase().includes(s)) ||
         (g.nombre_responsable && g.nombre_responsable.toLowerCase().includes(s)) ||
         (g.numero_factura && g.numero_factura.toLowerCase().includes(s)) ||
-        (g.cufe && g.cufe.toLowerCase().includes(s))
+        (g.cufe && g.cufe.toLowerCase().includes(s)) ||
+        (g.tipo_gasto && g.tipo_gasto.toLowerCase().includes(s))
     );
   }
 
-  // Orden descendente por fecha de registro
-  result.sort(
+  // Orden descendente por fecha de radicación
+  gastos.sort(
     (a, b) => new Date(b.creado_en).getTime() - new Date(a.creado_en).getTime()
   );
 
-  res.json(result);
+  res.json(gastos);
 });
 
-// 5. Radicar nuevo gasto
-app.post('/api/expenses', (req: Request, res: Response) => {
-  const db = readDB();
+// 6. Radicar nuevo gasto (con foto obligatoria protegida y CUFE validado)
+app.post('/api/expenses', requireAuth, async (req: Request, res: Response) => {
+  const user = req.user!;
   const body = req.body;
 
-  // Validación de CUFE 96 hex
-  const cufeLimpio = String(body.cufe || '').trim().toLowerCase();
-  if (cufeLimpio.length !== 96 || !/^[a-f0-9]{96}$/.test(cufeLimpio)) {
-    res.status(400).json({
-      error: 'El código CUFE es inválido. Debe tener exactamente 96 caracteres hexadecimales.',
-    });
+  // Validación estricta de propiedad de la radicación
+  if (user.role === 'trabajador' && body.user_id && body.user_id !== user.uid) {
+    res.status(403).json({ error: 'No está autorizado a radicar gastos en nombre de otro trabajador.' });
     return;
   }
 
-  // Validación de duplicado
-  const duplicado = db.expenses.find(
-    (g) => String(g.cufe || '').trim().toLowerCase() === cufeLimpio
-  );
-
-  if (duplicado) {
-    res.status(409).json({
-      error: `Esta factura ya está registrada en el sistema por ${duplicado.nombre_responsable} el ${new Date(duplicado.creado_en).toLocaleDateString('es-CO')}.`,
-      duplicado: true,
-      registrado_por: duplicado.nombre_responsable,
-      fecha_registro: duplicado.creado_en,
+  const cufeLimpio = String(body.cufe || '').trim().toLowerCase();
+  if (cufeLimpio.length !== 96 || !/^[a-f0-9]{96}$/.test(cufeLimpio)) {
+    res.status(400).json({
+      error: 'El código CUFE es inválido. Debe constar de exactamente 96 caracteres hexadecimales.',
     });
     return;
   }
 
   // Validación de fotografía obligatoria
-  if (!body.foto_url && !body.foto_path) {
-    res.status(400).json({ error: 'La fotografía de la factura es mandatoria como evidencia.' });
+  if (!body.foto_url) {
+    res.status(400).json({
+      error: 'La captura fotográfica de la factura con cámara en vivo es obligatoria.',
+    });
     return;
   }
 
-  let fotoPath = body.foto_path || `factura_${Date.now()}.jpg`;
-  if (body.foto_url && typeof body.foto_url === 'string' && body.foto_url.startsWith('data:image/')) {
-    try {
-      const match = body.foto_url.match(/^data:image\/(\w+);base64,(.+)$/);
-      if (match) {
-        const ext = match[1] === 'png' ? 'png' : 'jpg';
-        const fileName = `factura_${Date.now()}_${cufeLimpio.substring(0, 8)}.${ext}`;
-        const filePath = path.join(UPLOADS_DIR, fileName);
-        fs.writeFileSync(filePath, Buffer.from(match[2], 'base64'));
-        fotoPath = `/uploads/${fileName}`;
-      }
-    } catch (e) {
-      console.warn('Error al guardar archivo en disco:', e);
-    }
+  const expenseId = body.id || crypto.randomUUID();
+
+  // Guardar fotografía físicamente en almacén protegido
+  const fileName = `factura_${expenseId}_${Date.now()}.jpg`;
+  const filePath = path.join(PROTECTED_UPLOADS_DIR, fileName);
+
+  try {
+    const cleanBase64 = String(body.foto_url).replace(/^data:image\/[a-z]+;base64,/, '');
+    fs.writeFileSync(filePath, Buffer.from(cleanBase64, 'base64'));
+  } catch (err) {
+    console.error('Error al guardar archivo de foto:', err);
+    res.status(500).json({ error: 'Error al asegurar la imagen de la factura en el servidor.' });
+    return;
   }
 
   const nuevoGasto = {
-    id: body.id || 'exp-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+    id: expenseId,
     creado_en: body.creado_en || new Date().toISOString(),
-    user_id: body.user_id || 'usr_trabajador',
-    emisor: String(body.emisor || '').trim(),
-    nit_emisor: String(body.nit_emisor || '').trim() || null,
-    numero_factura: String(body.numero_factura || '').trim(),
+    user_id: user.uid,
+    emisor: body.emisor || 'No identificado',
+    nit_emisor: body.nit_emisor || null,
+    numero_factura: body.numero_factura || 'No identificado',
     cufe: cufeLimpio,
     qr_dian: body.qr_dian || null,
     fecha_emision: body.fecha_emision || new Date().toISOString().split('T')[0],
@@ -497,69 +715,240 @@ app.post('/api/expenses', (req: Request, res: Response) => {
     valor_neto: Number(body.valor_neto) || 0,
     iva: Number(body.iva) || 0,
     total: Number(body.total) || 0,
-    nombre_responsable: String(body.nombre_responsable || 'Trabajador Operativo').trim(),
-    cargo: String(body.cargo || 'Técnico de Campo').trim(),
+    tipo_documento: body.tipo_documento || 'Factura Electrónica de Venta',
+    forma_pago: body.forma_pago || 'Contado',
+    medio_pago: body.medio_pago || 'Bancarizado',
+    nombre_responsable: user.name || body.nombre_responsable,
+    cargo: user.cargo || body.cargo,
     tipo_gasto: body.tipo_gasto || 'Alimentación / Viáticos',
     tipo_pago: body.tipo_pago || 'Efectivo / Caja menor',
-    objeto: String(body.objeto || '').trim(),
-    foto_path: fotoPath,
-    foto_url: body.foto_url || fotoPath,
+    objeto: body.objeto || '',
+    foto_storage_path: fileName,
+    foto_url: `/api/expenses/${expenseId}/photo`,
     foto_tomada_en: body.foto_tomada_en || new Date().toISOString(),
-    confianza_extraccion: body.confianza_extraccion || 'alta',
     estado: 'pendiente',
-    comentario_aprobacion: null,
+    confianza_extraccion: body.confianza_extraccion || 'alta',
+    mensaje_diagnostico: body.mensaje_diagnostico || 'Radicado conforme.',
+    ia_raw_response: body.ia_raw_response || null,
   };
 
-  db.expenses.unshift(nuevoGasto);
-  writeDB(db);
+  // 1. Persistir en Firestore
+  try {
+    if (firestoreDb) {
+      await firestoreDb.collection('expenses').doc(expenseId).set(nuevoGasto);
+    }
+  } catch (err) {
+    console.warn('Persistencia en Firestore falló, escribiendo en almacén de respaldo:', err);
+  }
 
-  notifySSE({ type: 'new_expense', data: nuevoGasto });
+  // 2. Persistir en almacén local
+  const store = readLocalStore();
+  store.expenses = store.expenses.filter((g) => g.id !== expenseId);
+  store.expenses.unshift(nuevoGasto);
+  writeLocalStore(store);
+
+  // 3. Notificar a administradores conectados en tiempo real
+  notifySSE({ type: 'nuevo_gasto', data: nuevoGasto });
+
   res.status(201).json(nuevoGasto);
 });
 
-// 6. Aprobar o rechazar gasto con comentario
-app.patch('/api/expenses/:id/status', (req: Request, res: Response) => {
-  const db = readDB();
-  const { id } = req.params;
-  const { estado, comentario_aprobacion, actualizado_por } = req.body;
+// 7. Servir fotografía de factura PROTEGIDA con autenticación y verificación de permisos
+// Un trabajador solo puede ver sus fotos; un administrador puede ver cualquier foto.
+app.get('/api/expenses/:id/photo', requireAuth, async (req: Request, res: Response) => {
+  const expenseId = req.params.id;
+  const user = req.user!;
 
-  if (!['aprobado', 'rechazado', 'pendiente'].includes(estado)) {
-    res.status(400).json({ error: 'Estado no válido' });
+  let gasto: any = null;
+
+  // Consultar gasto en Firestore
+  try {
+    if (firestoreDb) {
+      const doc = await firestoreDb.collection('expenses').doc(expenseId).get();
+      if (doc.exists) {
+        gasto = doc.data();
+      }
+    }
+  } catch (e) {
+    // Continuar con almacén local
+  }
+
+  if (!gasto) {
+    const store = readLocalStore();
+    gasto = store.expenses.find((g) => g.id === expenseId);
+  }
+
+  if (!gasto) {
+    res.status(404).json({ error: 'Comprobante no encontrado en el sistema.' });
     return;
   }
 
-  const index = db.expenses.findIndex((g) => g.id === id);
-  if (index === -1) {
-    res.status(404).json({ error: 'Gasto no encontrado' });
+  // Comprobar autorización de acceso al archivo fotográfico
+  if (user.role !== 'administrador' && gasto.user_id !== user.uid) {
+    res.status(403).json({
+      error: 'Acceso denegado: No tiene autorización para consultar este archivo de factura.',
+    });
     return;
   }
 
-  db.expenses[index].estado = estado;
-  db.expenses[index].comentario_aprobacion = comentario_aprobacion || null;
-  db.expenses[index].actualizado_en = new Date().toISOString();
-  db.expenses[index].actualizado_por = actualizado_por || 'Administrador';
+  const fileName = gasto.foto_storage_path || `factura_${expenseId}.jpg`;
+  const filePath = path.join(PROTECTED_UPLOADS_DIR, fileName);
 
-  writeDB(db);
-  notifySSE({ type: 'status_updated', data: db.expenses[index] });
-
-  res.json(db.expenses[index]);
+  if (fs.existsSync(filePath)) {
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    fs.createReadStream(filePath).pipe(res);
+  } else {
+    // Si no está el archivo físico pero viene foto_url en dataUrl
+    if (gasto.foto_url && gasto.foto_url.startsWith('data:image/')) {
+      const base64Data = gasto.foto_url.replace(/^data:image\/[a-z]+;base64,/, '');
+      const imgBuffer = Buffer.from(base64Data, 'base64');
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.send(imgBuffer);
+    } else {
+      res.status(404).json({ error: 'El archivo físico de la fotografía no se encuentra en el servidor.' });
+    }
+  }
 });
 
-// 7. Catálogos auxiliares (obtener y actualizar)
-app.get('/api/catalogs', (req: Request, res: Response) => {
-  const db = readDB();
-  res.json(db.catalogs);
+// 8. Actualizar estado de aprobación/rechazo (EXCLUSIVO ADMINISTRADOR)
+app.patch('/api/expenses/:id/status', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+  const expenseId = req.params.id;
+  const { estado, comentario_aprobacion } = req.body;
+  const adminUser = req.user!;
+
+  if (!['aprobado', 'rechazado'].includes(estado)) {
+    res.status(400).json({ error: 'El estado solo puede ser aprobado o rechazado.' });
+    return;
+  }
+
+  const updateFields = {
+    estado,
+    comentario_aprobacion: comentario_aprobacion || null,
+    revisado_por: adminUser.name || adminUser.email,
+    actualizado_en: new Date().toISOString(),
+  };
+
+  // 1. Actualizar en Firestore
+  try {
+    if (firestoreDb) {
+      await firestoreDb.collection('expenses').doc(expenseId).update(updateFields);
+    }
+  } catch (err) {
+    console.warn('Actualización en Firestore falló, actualizando en almacén local:', err);
+  }
+
+  // 2. Actualizar en almacén local
+  const store = readLocalStore();
+  const idx = store.expenses.findIndex((g) => g.id === expenseId);
+  if (idx !== -1) {
+    store.expenses[idx] = { ...store.expenses[idx], ...updateFields };
+    writeLocalStore(store);
+  }
+
+  const updatedGasto = idx !== -1 ? store.expenses[idx] : { id: expenseId, ...updateFields };
+
+  // Notificar al trabajador vía SSE
+  notifySSE({
+    type: 'status_updated',
+    data: updatedGasto,
+  });
+
+  res.json(updatedGasto);
 });
 
-app.post('/api/catalogs', (req: Request, res: Response) => {
-  const db = readDB();
+// 9. Catálogos operacionales
+app.get('/api/catalogs', requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (firestoreDb) {
+      const catDoc = await firestoreDb.collection('catalogs').doc('default').get();
+      if (catDoc.exists) {
+        res.json(catDoc.data());
+        return;
+      }
+    }
+  } catch (e) {
+    // Fallback local
+  }
+  const store = readLocalStore();
+  res.json(store.catalogs);
+});
+
+app.post('/api/catalogs', requireAuth, requireAdmin, async (req: Request, res: Response) => {
   const { tiposGasto, tiposPago } = req.body;
 
-  if (Array.isArray(tiposGasto)) db.catalogs.tiposGasto = tiposGasto;
-  if (Array.isArray(tiposPago)) db.catalogs.tiposPago = tiposPago;
+  const catalogPayload = {
+    tiposGasto: Array.isArray(tiposGasto) ? tiposGasto : DEFAULT_CATALOGS.tiposGasto,
+    tiposPago: Array.isArray(tiposPago) ? tiposPago : DEFAULT_CATALOGS.tiposPago,
+    actualizado_en: new Date().toISOString(),
+  };
 
-  writeDB(db);
-  res.json(db.catalogs);
+  try {
+    if (firestoreDb) {
+      await firestoreDb.collection('catalogs').doc('default').set(catalogPayload, { merge: true });
+    }
+  } catch (e) {
+    console.warn('Escritura de catálogos en Firestore falló:', e);
+  }
+
+  const store = readLocalStore();
+  store.catalogs = catalogPayload;
+  writeLocalStore(store);
+
+  res.json(catalogPayload);
+});
+
+// 10. Gestión de Usuarios y Asignación de Roles (EXCLUSIVO ADMINISTRADOR)
+app.get('/api/users', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+  let usersList: any[] = [];
+  try {
+    if (firestoreDb) {
+      const snapshot = await firestoreDb.collection('users').get();
+      snapshot.forEach((doc: any) => {
+        usersList.push({ id: doc.id, ...doc.data() });
+      });
+    }
+  } catch (e) {
+    console.warn('Consulta de usuarios en Firestore falló:', e);
+  }
+
+  if (usersList.length === 0) {
+    const store = readLocalStore();
+    usersList = store.users;
+  }
+
+  res.json(usersList);
+});
+
+app.patch('/api/users/:uid/role', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+  const targetUid = req.params.uid;
+  const { rol, cargo } = req.body;
+
+  if (rol && !['trabajador', 'administrador'].includes(rol)) {
+    res.status(400).json({ error: 'Rol no válido. Debe ser trabajador o administrador.' });
+    return;
+  }
+
+  const updateData: any = { actualizado_en: new Date().toISOString() };
+  if (rol) updateData.rol = rol;
+  if (cargo) updateData.cargo = cargo;
+
+  try {
+    if (firestoreDb) {
+      await firestoreDb.collection('users').doc(targetUid).set(updateData, { merge: true });
+    }
+  } catch (e) {
+    console.warn('Actualización de rol en Firestore falló:', e);
+  }
+
+  const store = readLocalStore();
+  const userIdx = store.users.findIndex((u) => u.id === targetUid);
+  if (userIdx !== -1) {
+    store.users[userIdx] = { ...store.users[userIdx], ...updateData };
+    writeLocalStore(store);
+  }
+
+  res.json({ success: true, updated: updateData });
 });
 
 // ==========================================
@@ -570,11 +959,10 @@ async function startServer() {
 
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
-    const isHmrDisabled = process.env.DISABLE_HMR === 'true';
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
-        hmr: isHmrDisabled ? false : { server: httpServer },
+        hmr: false,
       },
       appType: 'spa',
     });
@@ -588,10 +976,10 @@ async function startServer() {
   }
 
   httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor de Legalización de Gastos activo en http://0.0.0.0:${PORT}`);
+    console.log(`[COLAVES] Servidor de Legalización de Gastos activo en http://0.0.0.0:${PORT}`);
   });
 }
 
 startServer().catch((err) => {
-  console.error('Fallo fatal al iniciar el servidor:', err);
+  console.error('Fallo fatal al iniciar el servidor Colaves:', err);
 });

@@ -2,27 +2,33 @@ import React from 'react';
 import { RolUsuario, UsuarioPerfil, NotificacionItem } from '../../types';
 import { PWAInstallButton } from './PWAInstallButton';
 import { NotificationBell } from '../notifications/NotificationBell';
+import { ColavesLogo } from './ColavesLogo';
 import {
   Sun,
   Moon,
   Shield,
-  User,
+  UserCheck,
   Wifi,
   WifiOff,
   RefreshCw,
   FlaskConical,
   Cloud,
-  FileSpreadsheet
+  FileSpreadsheet,
+  MessageSquare,
+  Menu,
+  LogOut
 } from 'lucide-react';
 
 interface Props {
   rol: RolUsuario;
-  onCambiarRol: (r: RolUsuario) => void;
   usuario: UsuarioPerfil;
-  onAbrirUsuarioModal: () => void;
+  seccionActivaTitulo: string;
+  onToggleSidebar: () => void;
+  onLogout: () => void;
   onAbrirTestsModal: () => void;
   onAbrirDriveModal: () => void;
   onAbrirSheetsModal: () => void;
+  onAbrirChatModal: () => void;
   temaOscuro: boolean;
   onToggleTema: () => void;
   isOnline: boolean;
@@ -37,12 +43,14 @@ interface Props {
 
 export const Navbar: React.FC<Props> = ({
   rol,
-  onCambiarRol,
   usuario,
-  onAbrirUsuarioModal,
+  seccionActivaTitulo,
+  onToggleSidebar,
+  onLogout,
   onAbrirTestsModal,
   onAbrirDriveModal,
   onAbrirSheetsModal,
+  onAbrirChatModal,
   temaOscuro,
   onToggleTema,
   isOnline,
@@ -55,44 +63,53 @@ export const Navbar: React.FC<Props> = ({
   onMarcarTodasNotificacionesLeidas,
 }) => {
   return (
-    <header className="sticky top-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-3 sm:px-6 py-2.5 transition-colors">
-      <div className="max-w-7xl mx-auto flex items-center justify-between gap-2">
-        {/* Marca y Título */}
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-2xl bg-gradient-to-tr from-emerald-600 via-teal-600 to-blue-700 flex items-center justify-center text-white shadow-md shadow-emerald-600/20">
-            <span className="font-black text-xs tracking-wider">LG</span>
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <h1 className="text-sm font-black text-slate-900 dark:text-white leading-tight">
-                Legalización de gastos
-              </h1>
-              <span className="hidden sm:inline-block text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-300 dark:border-emerald-700">
-                DIAN
-              </span>
+    <header className="sticky top-0 z-20 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-3 sm:px-6 py-2.5 transition-colors">
+      <div className="flex items-center justify-between gap-3">
+        {/* Botón de barra lateral y título de sección */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onToggleSidebar}
+            className="p-2 rounded-2xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition active:scale-95"
+            title="Alternar barra lateral de navegación"
+          >
+            <Menu className="w-4 h-4" />
+          </button>
+
+          <div className="flex items-center gap-2.5">
+            <ColavesLogo variant="emblem" size="sm" />
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-black text-[#07426B] dark:text-blue-400 uppercase tracking-wider">
+                  Colaves
+                </span>
+                <span className="text-slate-300 dark:text-slate-700">/</span>
+                <h1 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white">
+                  {seccionActivaTitulo}
+                </h1>
+              </div>
+              <p className="hidden sm:block text-[10px] text-slate-400 font-medium">
+                Trabajamos con el corazón • Control Fiscal DIAN
+              </p>
             </div>
-            <p className="text-[10px] text-slate-500 dark:text-slate-400">
-              Control Fiscal & Facturación Electrónica
-            </p>
           </div>
         </div>
 
-        {/* Acciones y Estados */}
+        {/* Acciones del encabezado */}
         <div className="flex items-center gap-1.5 sm:gap-2">
-          {/* Indicador de Conexión y Cola Offline */}
+          {/* Indicador de Conexión en Tiempo Real */}
           <div className="flex items-center gap-1">
             {isOnline ? (
               <span
-                className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-1 rounded-xl border border-emerald-200 dark:border-emerald-800"
-                title="Conectado al servidor"
+                className="flex items-center gap-1 text-[11px] font-bold text-[#206A3C] dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-xl border border-emerald-200 dark:border-emerald-800"
+                title="Conectado al servidor en tiempo real"
               >
-                <Wifi className="w-3.5 h-3.5" />
+                <Wifi className="w-3.5 h-3.5 text-[#2CAE4A]" />
                 <span className="hidden md:inline">En línea</span>
               </span>
             ) : (
               <span
-                className="flex items-center gap-1 text-[11px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 px-2 py-1 rounded-xl border border-rose-200 dark:border-rose-800"
-                title="Modo fuera de línea activo"
+                className="flex items-center gap-1 text-[11px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1 rounded-xl border border-rose-200 dark:border-rose-800"
+                title="Modo fuera de línea activo: los gastos se encolan localmente"
               >
                 <WifiOff className="w-3.5 h-3.5" />
                 <span className="hidden md:inline">Sin conexión</span>
@@ -103,8 +120,8 @@ export const Navbar: React.FC<Props> = ({
               <button
                 onClick={onSincronizarOffline}
                 disabled={sincronizando || !isOnline}
-                className="flex items-center gap-1 text-[11px] font-bold bg-amber-500 hover:bg-amber-600 text-white px-2 py-1 rounded-xl shadow-sm transition active:scale-95 disabled:opacity-50"
-                title="Sincronizar gastos guardados sin conexión"
+                className="flex items-center gap-1 text-[11px] font-bold bg-amber-500 hover:bg-amber-600 text-white px-2.5 py-1 rounded-xl shadow-sm transition active:scale-95 disabled:opacity-50"
+                title="Sincronizar facturas guardadas sin conexión"
               >
                 <RefreshCw className={`w-3 h-3 ${sincronizando ? 'animate-spin' : ''}`} />
                 <span>{colaOfflineCount} en cola</span>
@@ -112,56 +129,37 @@ export const Navbar: React.FC<Props> = ({
             )}
           </div>
 
-          {/* Botón Google Drive */}
-          <button
-            onClick={onAbrirDriveModal}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-xs font-bold transition active:scale-95"
-            title="Google Drive: respaldar y consultar facturas en la nube"
-          >
-            <Cloud className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-            <span className="hidden sm:inline">Drive</span>
-          </button>
-
-          {/* Botón Google Sheets */}
-          <button
-            onClick={onAbrirSheetsModal}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-bold transition active:scale-95"
-            title="Google Sheets: sincronizar hoja de cálculo contable en la nube"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-            <span className="hidden sm:inline">Sheets</span>
-          </button>
+          {/* Accesos Workspace para Administradores */}
+          {rol === 'administrador' && (
+            <div className="hidden lg:flex items-center gap-1 border-l border-r border-slate-200 dark:border-slate-800 px-1.5 mx-1">
+              <button
+                onClick={onAbrirDriveModal}
+                className="p-2 rounded-xl text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition"
+                title="Google Drive: respaldar comprobantes contables"
+              >
+                <Cloud className="w-4 h-4" />
+              </button>
+              <button
+                onClick={onAbrirSheetsModal}
+                className="p-2 rounded-xl text-[#206A3C] dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition"
+                title="Google Sheets: exportar hoja contable sincronizada"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+              </button>
+              <button
+                onClick={onAbrirChatModal}
+                className="p-2 rounded-xl text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition"
+                title="Google Chat: emitir notificaciones a espacios corporativos"
+              >
+                <MessageSquare className="w-4 h-4" />
+              </button>
+            </div>
+          )}
 
           {/* Botón PWA Install */}
           <PWAInstallButton />
 
-          {/* Selector de Rol */}
-          <div className="bg-slate-100 dark:bg-slate-800 p-0.5 rounded-2xl flex text-xs">
-            <button
-              onClick={() => onCambiarRol('trabajador')}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl font-bold transition text-[11px] ${
-                rol === 'trabajador'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-              }`}
-            >
-              <User className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Trabajador</span>
-            </button>
-            <button
-              onClick={() => onCambiarRol('administrador')}
-              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl font-bold transition text-[11px] ${
-                rol === 'administrador'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-              }`}
-            >
-              <Shield className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Admin</span>
-            </button>
-          </div>
-
-          {/* Campana de Notificaciones Web y de Estado */}
+          {/* Campana de Notificaciones Web */}
           <NotificationBell
             notificaciones={notificaciones}
             onLimpiarNotificaciones={onLimpiarNotificaciones}
@@ -169,33 +167,19 @@ export const Navbar: React.FC<Props> = ({
             onMarcarTodasLeidas={onMarcarTodasNotificacionesLeidas}
           />
 
-          {/* Badge del Usuario / Perfil */}
-          <button
-            onClick={onAbrirUsuarioModal}
-            className="flex items-center gap-1.5 p-1 sm:px-2.5 sm:py-1 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold transition"
-            title="Cambiar usuario o perfil"
-          >
-            <div className="w-6 h-6 rounded-lg bg-slate-300 dark:bg-slate-600 flex items-center justify-center font-black text-[10px]">
-              {usuario.nombre_completo.charAt(0)}
-            </div>
-            <span className="hidden lg:inline text-[11px] max-w-[120px] truncate">
-              {usuario.nombre_completo}
-            </span>
-          </button>
-
-          {/* Botón de Pruebas Unitarias */}
+          {/* Botón de Pruebas Unitarias de Validación */}
           <button
             onClick={onAbrirTestsModal}
-            className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
-            title="Ejecutar pruebas unitarias de validación"
+            className="p-2 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
+            title="Ejecutar suite de pruebas unitarias de validación (CUFE, NIT, Aritmética)"
           >
-            <FlaskConical className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <FlaskConical className="w-4 h-4 text-[#2CAE4A]" />
           </button>
 
           {/* Modo Oscuro / Claro */}
           <button
             onClick={onToggleTema}
-            className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
+            className="p-2 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
             title="Alternar tema claro/oscuro"
           >
             {temaOscuro ? (
@@ -204,6 +188,26 @@ export const Navbar: React.FC<Props> = ({
               <Moon className="w-4 h-4 text-slate-600" />
             )}
           </button>
+
+          {/* Identificación del Usuario y Cierre de Sesión */}
+          <div className="flex items-center gap-1.5 pl-1">
+            <div className="hidden sm:flex flex-col text-right">
+              <span className="text-xs font-bold text-slate-900 dark:text-white leading-tight truncate max-w-[130px]">
+                {usuario.nombre_completo}
+              </span>
+              <span className="text-[10px] text-slate-400 capitalize">
+                {usuario.rol}
+              </span>
+            </div>
+
+            <button
+              onClick={onLogout}
+              className="p-2 rounded-2xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 transition"
+              title="Cerrar sesión"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
     </header>
